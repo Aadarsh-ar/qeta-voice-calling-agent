@@ -655,13 +655,14 @@ export default function AgentDetailPage({
                 Call Phone
               </button>
 
-              {/* Test Agent in browser */}
+              {/* Test Agent */}
               <button
                 onClick={() => setIsTestModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs"
+                title="Test agent conversation and voice live"
               >
-                <Play className="w-3.5 h-3.5 fill-current text-emerald-600" />
-                Test in Browser
+                <Play className="w-3.5 h-3.5 fill-current text-white" />
+                TEST
               </button>
 
               {/* Duplicate Agent */}

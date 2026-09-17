@@ -178,7 +178,7 @@ export default function DashboardPage() {
                   className="btn-emerald-secondary text-xs px-4 py-2.5 flex-1 lg:flex-initial"
                 >
                   <Radio className="w-3.5 h-3.5 text-emerald-700 animate-pulse" />
-                  <span>Test in Browser</span>
+                  <span>TEST</span>
                 </button>
 
                 <button

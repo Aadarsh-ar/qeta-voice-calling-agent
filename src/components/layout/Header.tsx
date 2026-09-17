@@ -88,11 +88,10 @@ export function Header({
             <button
               type="button"
               onClick={onOpenTestAgent}
-              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 transition shadow-xs active:scale-98"
+              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition shadow-xs active:scale-98"
             >
-              <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse shrink-0" />
-              <span className="hidden md:inline">Test in Browser</span>
-              <span className="md:hidden">Test</span>
+              <Radio className="w-3.5 h-3.5 text-indigo-600 animate-pulse shrink-0" />
+              <span>TEST</span>
             </button>
           )}
 

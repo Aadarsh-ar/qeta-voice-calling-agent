@@ -4,45 +4,24 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X,
   Volume2,
-  Sparkles,
-  Zap,
-  Activity,
-  Bot,
-  User,
-  RotateCcw,
-  BookOpen,
-  Wrench,
-  ShieldAlert,
+  VolumeX,
   Mic,
   MicOff,
-  Radio,
-  ChevronDown,
-  ChevronUp,
-  Terminal,
-  PhoneOff,
-  Square,
-  Globe,
-  HelpCircle,
+  Send,
   Play,
+  RotateCcw,
+  PhoneOff,
+  Sparkles,
+  Bot,
+  User,
+  Zap,
 } from "lucide-react";
 
 interface TestTurn {
   role: "caller" | "ai";
   text: string;
-  normalizedText?: string;
-  intent?: string;
-  customerInput?: string;
-  cartesiaVoiceId?: string;
-  retrievedSnippets?: { source: string; title: string; score: number; content?: string }[];
-  toolCalls?: { name: string; args: Record<string, unknown>; result: unknown }[];
-  qualityValidation?: { wasModified: boolean; modificationReason?: string };
-  latencies?: {
-    sttMs: number;
-    llmMs: number;
-    ttsMs: number;
-    totalMs: number;
-  };
   audioBase64?: string;
+  latencyMs?: number;
   timestamp: string;
 }
 
@@ -57,949 +36,510 @@ interface TestAgentModalProps {
   systemPrompt?: string;
 }
 
-type CallStatus = "IDLE" | "CONNECTING" | "LISTENING" | "THINKING" | "SPEAKING" | "MUTED";
+const DEFAULT_GREETING = "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి కాలేజ్ అటెండెన్స్ గురించి కాల్ చేశాను.";
+
+const QUICK_PROMPTS = [
+  "నమస్తే అండి, మీరు ఎవరు?",
+  "అటెండెన్స్ వివరాలు చెప్పండి",
+  "ఈ రోజు ఏ క్లాసెస్ జరిగాయి?",
+  "ఫీజు ఎప్పుడు కట్టాలి?",
+  "మా అబ్బాయికి ఎన్ని మార్కులు వచ్చాయి?",
+  "ప్రిన్సిపాల్ మేడమ్‌తో మాట్లాడాలి",
+];
 
 export function TestAgentModal({
   isOpen,
   onClose,
   agentId,
-  agentName = "Telugu Sales Agent",
+  agentName = "Harika (Telugu Faculty Voice)",
   cartesiaVoiceId,
-  initialGreeting = "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
+  initialGreeting = DEFAULT_GREETING,
   instructions,
   systemPrompt,
 }: TestAgentModalProps) {
-  const [callStatus, setCallStatus] = useState<CallStatus>("IDLE");
-  const [liveTranscript, setLiveTranscript] = useState<string>("");
-  const [callDuration, setCallDuration] = useState<number>(0);
-  const [speechLanguage, setSpeechLanguage] = useState<"te-IN" | "en-IN">("te-IN");
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [openTraceIndex, setOpenTraceIndex] = useState<number | null>(null);
-  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState<boolean>(false);
-  const [micVolumeLevel, setMicVolumeLevel] = useState<number>(0);
-  const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
-  const [showManualFallback, setShowManualFallback] = useState<boolean>(false);
-  const [manualText, setManualText] = useState<string>("");
+  const [inputText, setInputText] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [callSeconds, setCallSeconds] = useState(0);
 
   const [turns, setTurns] = useState<TestTurn[]>([
     {
       role: "ai",
-      text: initialGreeting,
-      normalizedText: initialGreeting,
+      text: initialGreeting || DEFAULT_GREETING,
       timestamp: "00:00",
     },
   ]);
 
-  // Audio & Speech refs
-  const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const activeAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const micMediaStreamRef = useRef<MediaStream | null>(null);
-  const micAnalyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isListeningIntentionalRef = useRef<boolean>(false);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Play PCM audio from Cartesia base64 string
-  const playPcmAudio = useCallback(async (base64: string, sampleRate = 16000, onEnded?: () => void) => {
-    try {
-      const binaryString = window.atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      const int16Array = new Int16Array(bytes.buffer);
-      const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-      }
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        )({ sampleRate });
-      }
-
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-
-      // Stop any prior playing audio
-      if (activeAudioSourceRef.current) {
-        try {
-          activeAudioSourceRef.current.stop();
-        } catch {}
-      }
-
-      const buffer = ctx.createBuffer(1, float32Array.length, sampleRate);
-      buffer.getChannelData(0).set(float32Array);
-
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-
-      source.onended = () => {
-        activeAudioSourceRef.current = null;
+  // Play PCM 16-bit 16kHz audio from Cartesia
+  const playPcmAudio = useCallback(
+    (base64: string, sampleRate = 16000, onEnded?: () => void) => {
+      if (isMuted) {
         if (onEnded) onEnded();
-      };
-
-      activeAudioSourceRef.current = source;
-      setCallStatus("SPEAKING");
-      source.start();
-    } catch (e) {
-      console.warn("Audio playback error:", e);
-      if (onEnded) onEnded();
-    }
-  }, []);
-
-  // Stop current agent audio (for barge-in interruption)
-  const interruptAgentAudio = useCallback(() => {
-    if (activeAudioSourceRef.current) {
+        return;
+      }
       try {
-        activeAudioSourceRef.current.stop();
-        activeAudioSourceRef.current = null;
-      } catch {}
-    }
-  }, []);
-
-  // Submit spoken turn to backend AI orchestrator & Cartesia TTS
-  const handleTurnSubmit = useCallback(
-    async (spokenText: string) => {
-      const textToSend = spokenText.trim();
-      if (!textToSend) return;
-
-      // Stop recognition while waiting for AI response
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-
-      setCallStatus("THINKING");
-      setLiveTranscript("");
-
-      const callerTurn: TestTurn = {
-        role: "caller",
-        text: textToSend,
-        timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
-      };
-
-      setTurns((prev) => [...prev, callerTurn]);
-
-      try {
-        const conversationHistory = [...turns, callerTurn].map((t) => ({
-          role: t.role === "caller" ? "user" : "assistant",
-          content: t.text,
-        }));
-
-        const effectivePrompt = (systemPrompt || instructions || "").trim();
-        const res = await fetch("/api/agent/test", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agentId,
-            agentName,
-            voiceId: cartesiaVoiceId,
-            cartesiaVoiceId,
-            systemPrompt: effectivePrompt,
-            instructions: effectivePrompt,
-            userMessage: textToSend,
-            conversationHistory,
-          }),
-        });
-
-        const data = await res.json();
-
-        if (data.success) {
-          const aiTurn: TestTurn = {
-            role: "ai",
-            text: data.rawReply,
-            normalizedText: data.normalizedReply,
-            intent: data.intent || "General Inquiry",
-            customerInput: textToSend,
-            cartesiaVoiceId: data.cartesiaVoiceId,
-            retrievedSnippets: data.retrievedSnippets,
-            toolCalls: data.toolCalls,
-            qualityValidation: data.qualityValidation,
-            latencies: data.latencies,
-            audioBase64: data.audioBase64,
-            timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
-          };
-
-          setTurns((prev) => [...prev, aiTurn]);
-
-          // Play Cartesia spoken audio
-          if (data.audioBase64) {
-            playPcmAudio(data.audioBase64, data.sampleRate || 16000, () => {
-              // Once agent finishes speaking, automatically re-arm mic for continuous caller speech
-              if (!isMuted && isListeningIntentionalRef.current) {
-                startListening();
-              } else {
-                setCallStatus("IDLE");
-              }
-            });
-          } else {
-            // No audio returned, re-arm listening after short pause
-            setTimeout(() => {
-              if (!isMuted && isListeningIntentionalRef.current) {
-                startListening();
-              }
-            }, 800);
-          }
-        } else {
-          setTurns((prev) => [
-            ...prev,
-            {
-              role: "ai",
-              text: `(Error: ${data.error || "Turn processing failed"})`,
-              timestamp: "Error",
-            },
-          ]);
-          setCallStatus("IDLE");
+        const binary = window.atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
         }
-      } catch (err) {
-        console.error("Test turn error:", err);
-        setTurns((prev) => [
-          ...prev,
-          {
-            role: "ai",
-            text: "(Network error reaching voice test pipeline)",
-            timestamp: "Error",
-          },
-        ]);
-        setCallStatus("IDLE");
-      }
-    },
-    [agentId, turns, isMuted, playPcmAudio]
-  );
-
-  // Start continuous Web Speech Recognition
-  const startListening = useCallback(() => {
-    if (isMuted) return;
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setMicErrorMessage("Speech recognition not supported in this browser. Please use Chrome or Edge.");
-      setShowManualFallback(true);
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = speechLanguage;
-
-      recognition.onstart = () => {
-        setCallStatus("LISTENING");
-        setMicErrorMessage(null);
-        isListeningIntentionalRef.current = true;
-      };
-
-      recognition.onresult = (event: any) => {
-        // If agent was speaking and user begins talking, execute barge-in
-        interruptAgentAudio();
-
-        let interim = "";
-        let final = "";
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const trans = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            final += trans;
-          } else {
-            interim += trans;
-          }
+        const int16 = new Int16Array(bytes.buffer);
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) {
+          float32[i] = int16[i] / 32768.0;
         }
 
-        const currentSpoken = (final || interim).trim();
-        setLiveTranscript(currentSpoken);
-
-        // Reset silence timer on every new word detected
-        if (silenceTimerRef.current) {
-          clearTimeout(silenceTimerRef.current);
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+          )({ sampleRate });
+        }
+        const ctx = audioContextRef.current;
+        if (ctx.state === "suspended") {
+          ctx.resume();
         }
 
-        if (final.trim()) {
-          // Final sentence segment detected: auto-submit after natural 600ms boundary
-          silenceTimerRef.current = setTimeout(() => {
-            handleTurnSubmit(final.trim());
-          }, 600);
-        } else if (currentSpoken.length > 2) {
-          // Continuous interim speech: wait for 1300ms pause of silence, then auto-submit
-          silenceTimerRef.current = setTimeout(() => {
-            if (currentSpoken.trim()) {
-              handleTurnSubmit(currentSpoken.trim());
-            }
-          }, 1300);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error === "no-speech") return;
-        if (event.error === "not-allowed") {
-          setMicErrorMessage("Microphone access blocked. Please allow mic permission in your browser address bar.");
-          setCallStatus("IDLE");
-          setShowManualFallback(true);
-        }
-      };
-
-      recognition.onend = () => {
-        // Auto-restart if we are still meant to be in listening state and not waiting for AI turn
-        if (
-          isListeningIntentionalRef.current &&
-          callStatus !== "THINKING" &&
-          callStatus !== "SPEAKING" &&
-          !isMuted
-        ) {
+        if (activeSourceRef.current) {
           try {
-            recognition.start();
+            activeSourceRef.current.stop();
           } catch {}
         }
-      };
 
-      recognition.start();
-    } catch (e) {
-      console.warn("Speech recognition start failed:", e);
-    }
-  }, [speechLanguage, isMuted, callStatus, handleTurnSubmit, interruptAgentAudio]);
+        const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+        buffer.getChannelData(0).set(float32);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
 
-  // Stop listening
-  const stopListening = useCallback(() => {
-    isListeningIntentionalRef.current = false;
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-    }
-    if (recognitionRef.current) {
+        setIsSpeaking(true);
+        source.onended = () => {
+          activeSourceRef.current = null;
+          setIsSpeaking(false);
+          if (onEnded) onEnded();
+        };
+
+        activeSourceRef.current = source;
+        source.start();
+      } catch (err) {
+        console.warn("PCM audio playback error:", err);
+        setIsSpeaking(false);
+        if (onEnded) onEnded();
+      }
+    },
+    [isMuted]
+  );
+
+  const stopAudio = useCallback(() => {
+    if (activeSourceRef.current) {
       try {
-        recognitionRef.current.stop();
+        activeSourceRef.current.stop();
       } catch {}
+      activeSourceRef.current = null;
     }
+    setIsSpeaking(false);
   }, []);
 
-  // Initialize Microphone decibel audio analyser for animated waveform
-  const initMicAnalyser = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micMediaStreamRef.current = stream;
-
-      const audioCtx = new (
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      )();
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 64;
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      micAnalyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const updateVolume = () => {
-        if (!micAnalyserRef.current) return;
-        micAnalyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        setMicVolumeLevel(Math.min(100, Math.round((avg / 128) * 100)));
-        animFrameRef.current = requestAnimationFrame(updateVolume);
-      };
-      updateVolume();
-    } catch (err) {
-      console.warn("Could not capture mic stream for volume visualizer:", err);
+  // Timer counter
+  useEffect(() => {
+    if (isOpen) {
+      setCallSeconds(0);
+      timerRef.current = setInterval(() => {
+        setCallSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopAudio();
     }
-  }, []);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopAudio();
+    };
+  }, [isOpen, stopAudio]);
 
-  // Connect call when modal opens
-  const connectCall = useCallback(async () => {
-    setCallStatus("CONNECTING");
-    setCallDuration(0);
-    setMicErrorMessage(null);
+  // Auto scroll transcript to bottom
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns, isThinking]);
 
-    // Start duration timer
-    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    timerIntervalRef.current = setInterval(() => {
-      setCallDuration((prev) => prev + 1);
-    }, 1000);
+  // Send turn to backend
+  const handleSend = async (textToSend: string) => {
+    const cleanText = textToSend.trim();
+    if (!cleanText || isThinking) return;
 
-    // Initialize mic analyser
-    await initMicAnalyser();
+    stopAudio();
+    setInputText("");
+    setIsThinking(true);
 
-    // Trigger initial agent greeting voice synthesis
+    const now = new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" });
+    const userTurn: TestTurn = {
+      role: "caller",
+      text: cleanText,
+      timestamp: now,
+    };
+
+    setTurns((prev) => [...prev, userTurn]);
+
     try {
-      const effectivePrompt = (systemPrompt || instructions || "").trim();
+      const history = [...turns, userTurn].map((t) => ({
+        role: t.role === "caller" ? "user" : "assistant",
+        content: t.text,
+      }));
+
+      const effectiveInstructions = (instructions || systemPrompt || "").trim();
       const res = await fetch("/api/agent/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId,
           agentName,
-          systemPrompt: effectivePrompt,
-          instructions: effectivePrompt,
-          userMessage: initialGreeting,
-          conversationHistory: [],
+          cartesiaVoiceId,
+          instructions: effectiveInstructions,
+          systemPrompt: effectiveInstructions,
+          userMessage: cleanText,
+          conversationHistory: history,
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.audioBase64) {
-        playPcmAudio(data.audioBase64, data.sampleRate || 16000, () => {
-          startListening();
-        });
+      if (data.success && data.rawReply) {
+        const aiTurn: TestTurn = {
+          role: "ai",
+          text: data.rawReply,
+          audioBase64: data.audioBase64,
+          latencyMs: data.latencies?.totalMs,
+          timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+        };
+        setTurns((prev) => [...prev, aiTurn]);
+
+        if (data.audioBase64) {
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+        }
       } else {
-        startListening();
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: "ai",
+            text: data.error || "క్షమించండి, సర్వర్ నుండి ప్రతిస్పందన రాలేదు.",
+            timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+          },
+        ]);
       }
     } catch {
-      startListening();
+      setTurns((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          text: "కనెక్షన్ సమస్య వచ్చింది. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+          timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setIsThinking(false);
     }
-  }, [agentId, initialGreeting, initMicAnalyser, playPcmAudio, startListening]);
-
-  // Clean up all audio streams and timers on close
-  const disconnectCall = useCallback(() => {
-    stopListening();
-    interruptAgentAudio();
-
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-    }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    if (micMediaStreamRef.current) {
-      micMediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      micMediaStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      try {
-        audioContextRef.current.close();
-      } catch {}
-      audioContextRef.current = null;
-    }
-
-    setCallStatus("IDLE");
-    setLiveTranscript("");
-    setMicVolumeLevel(0);
-  }, [stopListening, interruptAgentAudio]);
-
-  // Handle modal mount / open
-  useEffect(() => {
-    if (isOpen) {
-      connectCall();
-    } else {
-      disconnectCall();
-    }
-    return () => {
-      disconnectCall();
-    };
-  }, [isOpen]);
-
-  // Format timer MM:SS
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Toggle Mute
-  const toggleMute = () => {
-    if (isMuted) {
-      setIsMuted(false);
-      startListening();
-    } else {
-      setIsMuted(true);
-      stopListening();
-      setCallStatus("MUTED");
+  // Toggle Microphone
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert("Microphone recognition is not supported in this browser. Please type your message below.");
+      return;
+    }
+
+    try {
+      const rec = new SpeechRec();
+      rec.lang = "te-IN";
+      rec.continuous = false;
+      rec.interimResults = true;
+
+      rec.onstart = () => {
+        setIsListening(true);
+        stopAudio();
+      };
+
+      rec.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setInputText(transcript);
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      rec.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (err) {
+      console.warn("Speech recognition error:", err);
+      setIsListening(false);
     }
   };
 
   // Reset conversation
-  const resetCall = () => {
-    disconnectCall();
+  const handleReset = () => {
+    stopAudio();
     setTurns([
       {
         role: "ai",
-        text: initialGreeting,
-        normalizedText: initialGreeting,
+        text: initialGreeting || DEFAULT_GREETING,
         timestamp: "00:00",
       },
     ]);
-    setTimeout(() => {
-      connectCall();
-    }, 200);
+    setCallSeconds(0);
+  };
+
+  const formatDuration = (sec: number) => {
+    const mins = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${mins.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden text-slate-100">
-        {/* Top Calling Status Bar */}
-        <div className="px-5 py-4 border-b border-slate-800/80 bg-slate-900/90 flex items-center justify-between shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-2xl h-[92vh] max-h-[720px] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-                <Bot className="w-5 h-5" />
-              </div>
-              <span
-                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 ${
-                  callStatus === "SPEAKING"
-                    ? "bg-indigo-500 animate-pulse"
-                    : callStatus === "LISTENING"
-                    ? "bg-emerald-500 animate-ping"
-                    : callStatus === "THINKING"
-                    ? "bg-amber-500 animate-spin"
-                    : "bg-slate-500"
-                }`}
-              />
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-600 text-white shadow-sm">
+              <Bot className="w-5 h-5" />
+              {isSpeaking && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-heading font-bold text-white text-base tracking-tight truncate">
+                <h3 className="text-sm font-bold text-slate-900 leading-tight">
                   {agentName}
                 </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold uppercase tracking-wider">
-                  Live Voice
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Cartesia Voice
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                <span className="font-mono text-emerald-400 font-medium">
-                  {formatTime(callDuration)}
+              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                <span className="inline-flex items-center gap-1 font-mono font-medium text-emerald-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {formatDuration(callSeconds)}
                 </span>
                 <span>•</span>
-                <span>Cartesia 16kHz Neural</span>
-                <span>•</span>
-                <span className="text-[11px] text-slate-400">
-                  {speechLanguage === "te-IN" ? "Telugu (te-IN)" : "English (en-IN)"}
+                <span className="text-[11px] text-slate-500 font-medium">
+                  {isSpeaking ? "Speaking..." : isThinking ? "Thinking..." : isListening ? "Listening..." : "Ready"}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Language Switcher */}
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => {
-                const nextLang = speechLanguage === "te-IN" ? "en-IN" : "te-IN";
-                setSpeechLanguage(nextLang);
-                if (callStatus === "LISTENING") {
-                  stopListening();
-                  setTimeout(startListening, 100);
-                }
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-300 border border-slate-700 transition flex items-center gap-1.5"
-              title="Toggle Mic Speech Language"
+              onClick={() => setIsMuted(!isMuted)}
+              className={`p-2 rounded-xl border transition ${
+                isMuted
+                  ? "bg-rose-50 text-rose-600 border-rose-200"
+                  : "bg-white hover:bg-slate-100 text-slate-600 border-slate-200"
+              }`}
+              title={isMuted ? "Unmute Agent Voice" : "Mute Agent Voice"}
             >
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{speechLanguage === "te-IN" ? "తెలుగు" : "EN"}</span>
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
-
             <button
-              onClick={resetCall}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
-              title="Redial / Reset conversation"
+              onClick={handleReset}
+              className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition"
+              title="Reset conversation"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
-
             <button
-              onClick={() => {
-                disconnectCall();
-                onClose();
-              }}
-              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition"
-              title="End call"
+              onClick={onClose}
+              className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-800 border border-slate-200 transition ml-1"
+              title="Close"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Central Hands-Free Mic Calling Room */}
-        <div className="flex-1 p-6 sm:p-8 flex flex-col items-center justify-center text-center relative overflow-y-auto">
-          {/* Subtle Ambient Glow */}
-          <div
-            className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ${
-              callStatus === "SPEAKING"
-                ? "bg-radial-indigo opacity-30"
-                : callStatus === "LISTENING"
-                ? "bg-radial-emerald opacity-25"
-                : "opacity-0"
-            }`}
-          />
-
-          {/* Large Pulsating Voice Orb */}
-          <div className="relative mb-8 mt-2">
-            {/* Pulsing Ripple Rings */}
-            {callStatus === "LISTENING" && (
-              <>
-                <div
-                  className="absolute -inset-4 rounded-full bg-emerald-500/20 animate-ping duration-1000"
-                  style={{ animationDuration: "2.4s" }}
-                />
-                <div
-                  className="absolute -inset-8 rounded-full border border-emerald-500/30 animate-pulse"
-                  style={{ transform: `scale(${1 + micVolumeLevel / 150})` }}
-                />
-              </>
-            )}
-
-            {callStatus === "SPEAKING" && (
-              <>
-                <div
-                  className="absolute -inset-6 rounded-full bg-indigo-500/25 animate-ping"
-                  style={{ animationDuration: "1.8s" }}
-                />
-                <div className="absolute -inset-10 rounded-full border border-indigo-500/40 animate-pulse" />
-              </>
-            )}
-
-            {callStatus === "THINKING" && (
-              <div className="absolute -inset-6 rounded-full border-2 border-dashed border-amber-500/50 animate-spin duration-700" />
-            )}
-
-            {/* Central Interactive Orb Button */}
-            <button
-              onClick={() => {
-                if (callStatus === "SPEAKING") {
-                  // Barge in!
-                  interruptAgentAudio();
-                  startListening();
-                } else if (callStatus === "LISTENING") {
-                  toggleMute();
-                } else if (isMuted || callStatus === "MUTED") {
-                  toggleMute();
-                } else {
-                  startListening();
-                }
-              }}
-              className={`relative w-28 h-28 sm:w-32 sm:h-32 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all duration-300 ${
-                callStatus === "LISTENING"
-                  ? "bg-emerald-600 text-white ring-8 ring-emerald-500/20 shadow-emerald-900/50 scale-105"
-                  : callStatus === "SPEAKING"
-                  ? "bg-indigo-600 text-white ring-8 ring-indigo-500/20 shadow-indigo-900/50 scale-105"
-                  : callStatus === "THINKING"
-                  ? "bg-amber-600 text-white ring-8 ring-amber-500/20 shadow-amber-900/50"
-                  : isMuted
-                  ? "bg-rose-900/80 text-rose-300 ring-8 ring-rose-900/20"
-                  : "bg-slate-800 text-slate-300 ring-4 ring-slate-700"
-              }`}
-            >
-              {callStatus === "LISTENING" ? (
-                <>
-                  <Mic className="w-10 h-10 animate-pulse" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
-                    Listening
-                  </span>
-                </>
-              ) : callStatus === "SPEAKING" ? (
-                <>
-                  <Volume2 className="w-10 h-10 animate-bounce" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
-                    Agent Speaking
-                  </span>
-                </>
-              ) : callStatus === "THINKING" ? (
-                <>
-                  <Activity className="w-10 h-10 animate-spin" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
-                    Thinking...
-                  </span>
-                </>
-              ) : isMuted ? (
-                <>
-                  <MicOff className="w-10 h-10" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
-                    Muted
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Mic className="w-10 h-10" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
-                    Tap to Speak
-                  </span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Dynamic Frequency Waveform Visualization */}
-          <div className="flex items-center justify-center gap-1.5 h-10 mb-6">
-            {[40, 65, 85, 100, 75, 50, 90, 60, 45, 70, 80, 55, 35].map((height, i) => {
-              const activeHeight =
-                callStatus === "LISTENING"
-                  ? Math.max(15, (height * micVolumeLevel) / 100)
-                  : callStatus === "SPEAKING"
-                  ? Math.max(20, Math.sin(Date.now() / 150 + i) * 35 + 45)
-                  : 12;
-
-              return (
-                <div
-                  key={i}
-                  className={`w-1.5 rounded-full transition-all duration-150 ${
-                    callStatus === "LISTENING"
-                      ? "bg-emerald-400"
-                      : callStatus === "SPEAKING"
-                      ? "bg-indigo-400"
-                      : "bg-slate-700 opacity-40"
-                  }`}
-                  style={{ height: `${activeHeight}px` }}
-                />
-              );
-            })}
-          </div>
-
-          {/* Status Label / Directive */}
-          <div className="max-w-md mx-auto mb-4">
-            {callStatus === "LISTENING" && (
-              <p className="text-sm font-semibold text-emerald-400 animate-pulse">
-                🎙️ Speak into your microphone... (Hands-free auto turn)
-              </p>
-            )}
-            {callStatus === "SPEAKING" && (
-              <div className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-300">
-                <span>🔊 Cartesia Neural Voice is speaking...</span>
-                <button
-                  onClick={() => {
-                    interruptAgentAudio();
-                    startListening();
-                  }}
-                  className="px-2.5 py-0.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/30 transition flex items-center gap-1"
-                >
-                  <Square className="w-3 h-3 fill-current" />
-                  Interrupt
-                </button>
-              </div>
-            )}
-            {callStatus === "THINKING" && (
-              <p className="text-sm font-semibold text-amber-400 flex items-center justify-center gap-1.5">
-                <Activity className="w-4 h-4 animate-spin" />
-                Generating turn (Sarvam STT → Normalizer → Cartesia TTS)...
-              </p>
-            )}
-            {callStatus === "MUTED" && (
-              <p className="text-sm font-semibold text-rose-400">
-                Microphone is muted. Tap orb or Unmute to speak.
-              </p>
-            )}
-            {callStatus === "IDLE" && !micErrorMessage && (
-              <p className="text-sm text-slate-400">
-                Microphone idle. Tap the orb to resume speaking.
-              </p>
-            )}
-            {micErrorMessage && (
-              <div className="p-3 rounded-2xl bg-rose-950/60 border border-rose-800 text-rose-300 text-xs font-medium">
-                {micErrorMessage}
-              </div>
-            )}
-          </div>
-
-          {/* Live Real-time Subtitles / Speech Transcript Caption */}
-          <div className="w-full max-w-xl min-h-[56px] px-6 py-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-center shadow-inner">
-            {liveTranscript ? (
-              <p className="text-sm sm:text-base font-medium text-emerald-300 italic animate-in fade-in">
-                "{liveTranscript}"
-              </p>
-            ) : callStatus === "SPEAKING" ? (
-              <p className="text-xs sm:text-sm text-indigo-200 line-clamp-2">
-                "{turns[turns.length - 1]?.text}"
-              </p>
-            ) : (
-              <p className="text-xs text-slate-500 font-mono">
-                {callStatus === "LISTENING"
-                  ? "Say something in Telugu or English (e.g. 'మీ సర్వీసెస్ గురించి చెప్పండి')..."
-                  : "Live subtitles will appear here as you speak..."}
-              </p>
-            )}
-          </div>
-
-          {/* Emergency Manual Fallback Option */}
-          {showManualFallback && (
-            <div className="w-full max-w-xl mt-4 p-3 rounded-2xl bg-slate-800/80 border border-slate-700 flex gap-2">
-              <input
-                type="text"
-                value={manualText}
-                onChange={(e) => setManualText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && manualText.trim()) {
-                    handleTurnSubmit(manualText);
-                    setManualText("");
-                  }
-                }}
-                placeholder="Fallback: Type message here if mic blocked..."
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-xs text-white focus:outline-hidden focus:border-emerald-500"
-              />
-              <button
-                onClick={() => {
-                  if (manualText.trim()) {
-                    handleTurnSubmit(manualText);
-                    setManualText("");
-                  }
-                }}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
-              >
-                Send
-              </button>
+        {/* Live Audio Visualizer Banner when speaking */}
+        {isSpeaking && (
+          <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between text-xs text-indigo-900 font-medium shrink-0 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-0.5">
+                <span className="w-1 h-3 bg-indigo-600 rounded-full animate-pulse" />
+                <span className="w-1 h-5 bg-indigo-600 rounded-full animate-pulse delay-75" />
+                <span className="w-1 h-4 bg-indigo-600 rounded-full animate-pulse delay-150" />
+                <span className="w-1 h-2 bg-indigo-600 rounded-full animate-pulse delay-100" />
+              </span>
+              <span>Agent is speaking live audio via Cartesia Sonic...</span>
             </div>
-          )}
-        </div>
-
-        {/* Collapsible Call Transcript & Section 17 Runtime Trace */}
-        <div className="border-t border-slate-800/80 bg-slate-950/80">
-          <div className="px-5 py-3 flex items-center justify-between">
             <button
-              onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
-              className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white transition"
+              onClick={stopAudio}
+              className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
             >
-              <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Call Transcript & Latency Trace ({turns.length} turns)</span>
-              {isTranscriptExpanded ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronUp className="w-3.5 h-3.5" />
-              )}
-            </button>
-
-            <button
-              onClick={() => setShowManualFallback(!showManualFallback)}
-              className="text-[11px] text-slate-400 hover:text-slate-200 underline decoration-slate-600"
-            >
-              {showManualFallback ? "Hide typing option" : "Mic issues? Type instead"}
+              Stop Audio
             </button>
           </div>
+        )}
 
-          {isTranscriptExpanded && (
-            <div className="p-5 max-h-64 overflow-y-auto space-y-3 bg-slate-900/60 border-t border-slate-800">
-              {turns.map((turn, i) => (
+        {/* Conversation Transcript */}
+        <div className="flex-1 p-4 overflow-y-auto space-y-3.5 bg-slate-50/40">
+          {turns.map((turn, index) => {
+            const isAi = turn.role === "ai";
+            return (
+              <div
+                key={index}
+                className={`flex items-start gap-2.5 ${isAi ? "justify-start" : "justify-end"}`}
+              >
+                {isAi && (
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                )}
                 <div
-                  key={i}
-                  className={`flex gap-3 ${
-                    turn.role === "caller" ? "justify-end" : "justify-start"
+                  className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-xs shadow-xs leading-relaxed ${
+                    isAi
+                      ? "bg-white border border-slate-200 text-slate-800 rounded-tl-sm"
+                      : "bg-indigo-600 text-white rounded-tr-sm"
                   }`}
                 >
-                  {turn.role === "ai" && (
-                    <div className="w-7 h-7 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 flex items-center justify-center shrink-0 text-xs">
-                      <Bot className="w-3.5 h-3.5" />
-                    </div>
-                  )}
-
+                  <p className="whitespace-pre-wrap">{turn.text}</p>
                   <div
-                    className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
-                      turn.role === "caller"
-                        ? "bg-emerald-900/90 text-emerald-50 border border-emerald-700/50"
-                        : "bg-slate-800 text-slate-100 border border-slate-700"
+                    className={`flex items-center justify-between gap-3 mt-1.5 pt-1 text-[10px] ${
+                      isAi ? "text-slate-400 border-t border-slate-100" : "text-indigo-200 border-t border-indigo-500/40"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-4 mb-1 text-[10px] opacity-70">
-                      <span className="font-bold">
-                        {turn.role === "caller" ? "You (Spoken into Mic)" : agentName}
-                      </span>
-                      <span>{turn.timestamp}</span>
-                    </div>
-
-                    <p>{turn.text}</p>
-
-                    {/* Section 17 Latencies */}
-                    {turn.latencies && (
-                      <div className="mt-2 pt-2 border-t border-slate-700/80 flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-300">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400">
-                          STT: {turn.latencies.sttMs}ms
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-indigo-400">
-                          LLM: {turn.latencies.llmMs}ms
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-emerald-400">
-                          TTS: {turn.latencies.ttsMs}ms
-                        </span>
-                        <span className="ml-auto font-bold text-emerald-300">
-                          Total: {turn.latencies.totalMs}ms
-                        </span>
-                      </div>
-                    )}
-
-                    {turn.audioBase64 && (
+                    <span>{turn.timestamp}</span>
+                    {isAi && turn.audioBase64 && (
                       <button
                         onClick={() => playPcmAudio(turn.audioBase64!)}
-                        className="mt-1.5 text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                        className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-800"
                       >
-                        <Volume2 className="w-3 h-3" />
-                        Replay Audio
+                        <Play className="w-2.5 h-2.5 fill-current" />
+                        Replay
                       </button>
                     )}
+                    {turn.latencyMs && (
+                      <span className="font-mono text-emerald-600 font-semibold inline-flex items-center gap-0.5">
+                        <Zap className="w-2.5 h-2.5" />
+                        {(turn.latencyMs / 1000).toFixed(2)}s
+                      </span>
+                    )}
                   </div>
-
-                  {turn.role === "caller" && (
-                    <div className="w-7 h-7 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 flex items-center justify-center shrink-0 text-xs">
-                      <User className="w-3.5 h-3.5" />
-                    </div>
-                  )}
                 </div>
-              ))}
+                {!isAi && (
+                  <div className="w-7 h-7 rounded-lg bg-slate-700 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                    <User className="w-4 h-4" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {isThinking && (
+            <div className="flex items-center gap-2.5 justify-start text-xs text-slate-500">
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div className="px-4 py-2.5 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
+                <span className="text-slate-600 font-medium">Generating speech & Cartesia TTS...</span>
+              </div>
             </div>
           )}
+
+          <div ref={transcriptEndRef} />
         </div>
 
-        {/* Bottom Hands-Free Call Action Bar */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
+        {/* Quick Test Prompts */}
+        <div className="px-4 py-2 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider mr-1">
+            Quick:
+          </span>
+          {QUICK_PROMPTS.map((prompt, i) => (
             <button
-              onClick={toggleMute}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 border ${
-                isMuted
-                  ? "bg-rose-600 hover:bg-rose-500 text-white border-rose-500"
-                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
-              }`}
+              key={i}
+              onClick={() => handleSend(prompt)}
+              disabled={isThinking}
+              className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 text-[11px] font-medium border border-slate-200 hover:border-indigo-200 transition shrink-0 disabled:opacity-50"
             >
-              {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              <span>{isMuted ? "Unmute Mic" : "Mute Mic"}</span>
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        {/* Bottom Input Area */}
+        <div className="p-3 bg-white border-t border-slate-200 shrink-0">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend(inputText);
+            }}
+            className="flex items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`p-2.5 rounded-xl border transition shrink-0 ${
+                isListening
+                  ? "bg-rose-600 text-white border-rose-600 animate-pulse shadow-md shadow-rose-500/20"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+              }`}
+              title={isListening ? "Listening... click to stop" : "Speak into microphone"}
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
 
-            {callStatus === "SPEAKING" && (
-              <button
-                onClick={() => {
-                  interruptAgentAudio();
-                  startListening();
-                }}
-                className="px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition flex items-center gap-1.5"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span>Barge In (Interrupt)</span>
-              </button>
-            )}
-          </div>
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type message in Telugu or English (e.g. అటెండెన్స్ వివరాలు చెప్పు)..."
+              disabled={isThinking}
+              className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs focus:outline-none focus:border-indigo-500 focus:bg-white transition"
+            />
 
-          <div className="flex items-center gap-3">
             <button
-              onClick={() => {
-                disconnectCall();
-                onClose();
-              }}
-              className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950 transition flex items-center gap-2"
+              type="submit"
+              disabled={!inputText.trim() || isThinking}
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Send</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition shrink-0"
+              title="End call"
             >
               <PhoneOff className="w-4 h-4" />
-              <span>End Call</span>
             </button>
-          </div>
+          </form>
         </div>
       </div>
     </div>
