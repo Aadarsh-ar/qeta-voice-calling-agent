@@ -360,6 +360,7 @@ export default function AgentsPage() {
         onClose={() => setIsTestModalOpen(false)}
         agentId={selectedAgent?.id}
         agentName={selectedAgent?.name}
+        cartesiaVoiceId={selectedAgent?.cartesiaVoiceId}
       />
 
       <RealPhoneCallModal

@@ -122,6 +122,18 @@ export class AgentOrchestrator {
       faqs: [],
     };
 
+    // Agent-specific policies - never inject e-commerce warranty/refunds into academic or other agents
+    const isRetailAgent = biz.businessName?.toLowerCase().includes("electronics") || 
+      biz.businessName?.toLowerCase().includes("abc") || 
+      biz.productsServices?.toLowerCase().includes("appliance");
+
+    const defaultPolicies = isRetailAgent ? {
+      refundPolicy: "రీఫండ్లు ఆర్డర్ డెలివరీ అయిన 7 రోజులలోపు మాత్రమే వర్తిస్తాయి. ఉత్పత్తి అసలైన స్థితిలో ఉండాలి.",
+      cancellationPolicy: "ఆర్డర్ షిప్పింగ్ కావడానికి ముందే కాల్ చేసి ఉచితంగా రద్దు చేసుకోవచ్చు.",
+      deliveryPolicy: "ఆర్డర్లు ఆర్డర్ చేసిన 2 నుండి 4 పని దినాలలో డెలివరీ చేయబడతాయి.",
+      warrantyPolicy: "అన్ని హార్డ్‌వేర్ పరికరాలకు 1 సంవత్సరం రీప్లేస్‌మెంట్ వారంటీ ఉంటుంది.",
+    } : undefined;
+
     const knowledgeContext: AgentKnowledgeContext = {
       businessName: biz.businessName,
       businessType: biz.description,
@@ -131,17 +143,8 @@ export class AgentOrchestrator {
       location: biz.location,
       contactInfo: biz.contactInfo,
       faqs: biz.faqs || [],
-      policies: (biz as any).policies || {
-        refundPolicy: "రీఫండ్లు ఆర్డర్ డెలివరీ అయిన 7 రోజులలోపు మాత్రమే వర్తిస్తాయి. ఉత్పత్తి అసలైన స్థితిలో ఉండాలి.",
-        cancellationPolicy: "ఆర్డర్ షిప్పింగ్ కావడానికి ముందే కాల్ చేసి ఉచితంగా రద్దు చేసుకోవచ్చు.",
-        deliveryPolicy: "ఆర్డర్లు ఆర్డర్ చేసిన 2 నుండి 4 పని దినాలలో డెలివరీ చేయబడతాయి.",
-        warrantyPolicy: "అన్ని హార్డ్‌వేర్ పరికరాలకు 1 సంవత్సరం రీప్లేస్‌మెంట్ వారంటీ ఉంటుంది.",
-      },
-      pricing: [
-        { planName: "Starter", price: "₹15,000/month", features: "2,000 calling minutes, Telugu & Tenglish STT/TTS" },
-        { planName: "Growth", price: "₹35,000/month", features: "6,000 calling minutes, priority telephony routing" },
-        { planName: "Enterprise", price: "Custom", features: "Unlimited minutes, dedicated SIP trunk & CRM integration" },
-      ],
+      policies: (biz as any).policies || defaultPolicies,
+      pricing: (biz as any).pricing || undefined,
     };
 
     const { snippets, isGroundedTopic } = knowledgeRetriever.retrieveRelevantKnowledge(

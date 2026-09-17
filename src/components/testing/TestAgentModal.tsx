@@ -51,6 +51,7 @@ interface TestAgentModalProps {
   onClose: () => void;
   agentId?: string;
   agentName?: string;
+  cartesiaVoiceId?: string;
   initialGreeting?: string;
   instructions?: string;
   systemPrompt?: string;
@@ -63,6 +64,7 @@ export function TestAgentModal({
   onClose,
   agentId,
   agentName = "Telugu Sales Agent",
+  cartesiaVoiceId,
   initialGreeting = "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
   instructions,
   systemPrompt,
@@ -202,6 +204,8 @@ export function TestAgentModal({
           body: JSON.stringify({
             agentId,
             agentName,
+            voiceId: cartesiaVoiceId,
+            cartesiaVoiceId,
             systemPrompt: effectivePrompt,
             instructions: effectivePrompt,
             userMessage: textToSend,

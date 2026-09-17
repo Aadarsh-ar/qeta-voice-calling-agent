@@ -922,9 +922,20 @@ export default function AgentDetailPage({
                       <span className="text-slate-500">TTS Engine:</span>
                       <span className="text-slate-900 font-semibold">Cartesia Sonic</span>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-200">
+                    <div className="flex items-center justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">Cloned Voice:</span>
-                      <span className="text-slate-900 font-semibold">{agent.cartesiaVoiceName || "AD"}</span>
+                      <select
+                        value={cartesiaVoiceId}
+                        onChange={(e) => setCartesiaVoiceId(e.target.value)}
+                        className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="f9945b75-0f3b-448d-ba9e-3d22c229a68e">
+                          AD (Cloned Telugu Voice - Male)
+                        </option>
+                        <option value="89907713-42ce-4ddd-8ff5-301211c564c1">
+                          Harika (Telugu Faculty Voice - Female)
+                        </option>
+                      </select>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">Voice Synthesis:</span>
@@ -1260,6 +1271,7 @@ export default function AgentDetailPage({
         onClose={() => setIsTestModalOpen(false)}
         agentId={agent.id}
         agentName={agent.name}
+        cartesiaVoiceId={cartesiaVoiceId || agent.cartesiaVoiceId}
         systemPrompt={systemPrompt}
         instructions={systemPrompt}
         initialGreeting={initialMessage || agent.initialMessage}

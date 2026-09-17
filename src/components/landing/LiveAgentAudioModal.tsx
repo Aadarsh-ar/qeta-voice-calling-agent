@@ -19,20 +19,26 @@ interface AgentOption {
   greeting: string;
   description: string;
   sampleQuestions: string[];
+  voiceName: string;
+  voiceGender: string;
+  voiceId: string;
 }
 
 const AGENTS: AgentOption[] = [
   {
     id: "agent_minb6qwKNfwWXLV8gyRfRq",
     name: "College Support",
-    role: "College Admissions & Attendance Helpline",
+    role: "Admissions & Attendance Helpline",
     emoji: "🎓",
-    greeting: "నమస్కారం! నేను College Student Helpline నుండి మాట్లాడుతున్నాను. Admissions, fees, లేదా attendance గురించి ఏమైనా అడగాలంటే చెప్పండి.",
-    description: "Assists parents and students with attendance requirements (75% rule), exam fees, and semester academic counseling in polite natural Telugu.",
+    voiceName: "Harika Voice",
+    voiceGender: "Female (Telugu)",
+    voiceId: "89907713-42ce-4ddd-8ff5-301211c564c1",
+    greeting: "“హలో అండి, నేను Naresh గారి పేరెంట్స్‌తో మాట్లాడుతున్నానా?”",
+    description: "Assists parents and students with attendance counseling (75% rule), exam fees, and semester academic policies in polite natural Telugu.",
     sampleQuestions: [
-      "What is the required attendance percentage?",
-      "కాలేజ్ అటెండెన్స్ రూల్స్ ఏంటి?",
-      "హాస్టల్ అండ్ ఎగ్జామ్ ఫీజు ఎంత?",
+      "కాలేజ్ attendance requirement ఎంత?",
+      "నా కొడుకు attendance 75% కన్నా తక్కువ ఉంటే ఏమవుతుంది?",
+      "ఎగ్జామ్ ఫీజు ఎప్పుడు కట్టాలి?",
     ],
   },
   {
@@ -40,7 +46,10 @@ const AGENTS: AgentOption[] = [
     name: "ABC Support",
     role: "Electronics Retail & Service Support",
     emoji: "🛒",
-    greeting: "హలో అండి! నేను ABC Electronics నుండి మాట్లాడుతున్నాను. Products, orders, లేదా service గురించి ఏమైనా సహాయం కావాలంటే చెప్పండి.",
+    voiceName: "AD Voice",
+    voiceGender: "Male (Tenglish)",
+    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    greeting: "హలో అండి! నేను Aadarsh మాట్లాడుతున్నాను, ABC Electronics నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?",
     description: "Handles customer inquiries regarding consumer appliances, refrigerators, warranties, repair bookings, and store locations in natural Telugu & Tenglish.",
     sampleQuestions: [
       "Do you sell refrigerators?",
@@ -338,6 +347,8 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId: selectedAgent.id,
+          voiceId: selectedAgent.voiceId,
+          cartesiaVoiceId: selectedAgent.voiceId,
           userMessage: userText,
           conversationHistory: history,
         }),
@@ -374,10 +385,76 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     }
   };
 
+  // Allows seamlessly switching agent in the middle of a live conversation with strict context isolation
+  const switchAgentDuringCall = async (targetAgent: AgentOption) => {
+    if (selectedAgent.id === targetAgent.id) return;
+
+    // 1. Immediately halt audio and mic
+    stopAudio();
+    stopMic();
+    if (echoGuardTimerRef.current) {
+      clearTimeout(echoGuardTimerRef.current);
+      echoGuardTimerRef.current = null;
+    }
+
+    // 2. Switch agent and wipe history to prevent agent cross-contamination
+    setSelectedAgent(targetAgent);
+    setMessages([]);
+    messagesRef.current = [];
+    setError("");
+    setMicPartial("");
+    setTextInput("");
+
+    if (!isActiveRef.current) return;
+
+    // 3. Play the newly selected agent's greeting with that agent's exact voice
+    setState("speaking");
+    const greetingMsg: Message = {
+      id: Date.now().toString() + Math.random(),
+      role: "agent",
+      text: targetAgent.greeting,
+    };
+    setMessages([greetingMsg]);
+    messagesRef.current = [greetingMsg];
+
+    try {
+      const res = await fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: targetAgent.id,
+          voiceId: targetAgent.voiceId,
+          cartesiaVoiceId: targetAgent.voiceId,
+          ttsOnly: true,
+          textToSpeak: targetAgent.greeting,
+        }),
+      });
+      const data = await res.json();
+
+      if (!isActiveRef.current) return;
+
+      if (data.audioBase64) {
+        await playPcmAudio(data.audioBase64);
+      } else {
+        await playBrowserSpeech(targetAgent.greeting);
+      }
+
+      if (isActiveRef.current) {
+        startListening();
+      }
+    } catch {
+      if (isActiveRef.current) {
+        await playBrowserSpeech(targetAgent.greeting);
+        if (isActiveRef.current) startListening();
+      }
+    }
+  };
+
   // Explicit user trigger: Start conversation after agent selection
   const startConversation = async () => {
     setError("");
     setMessages([]);
+    messagesRef.current = [];
     isActiveRef.current = true;
     setState("connecting");
 
@@ -392,6 +469,8 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId: selectedAgent.id,
+          voiceId: selectedAgent.voiceId,
+          cartesiaVoiceId: selectedAgent.voiceId,
           ttsOnly: true,
           textToSpeak: selectedAgent.greeting,
         }),
@@ -459,7 +538,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 </span>
               </h3>
               <p className="text-[11px] text-slate-500">
-                {isOnCall ? `Active Call with ${selectedAgent.name}` : "Select an agent and start conversation"}
+                {isOnCall ? `Active Call: ${selectedAgent.name} (${selectedAgent.voiceName})` : "Select Harika Voice (College) or AD Voice (ABC)"}
               </p>
             </div>
           </div>
@@ -486,6 +565,44 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
           </div>
         </div>
 
+        {/* ─── LIVE AGENT SWITCHER (AVAILABLE WHILE TALKING) ─── */}
+        {isOnCall && (
+          <div className="px-4 py-2 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Radio className="w-3 h-3 text-emerald-600 animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 hidden sm:inline">
+                Live Agent:
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-1 justify-end">
+              {AGENTS.map((ag) => {
+                const isSelected = selectedAgent.id === ag.id;
+                return (
+                  <button
+                    key={ag.id}
+                    type="button"
+                    onClick={() => switchAgentDuringCall(ag)}
+                    title={`Switch to ${ag.name} (${ag.voiceName})`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
+                      isSelected
+                        ? "bg-emerald-700 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20"
+                        : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>{ag.emoji}</span>
+                    <span className="text-[11px] font-bold truncate">{ag.name}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                      isSelected ? "bg-emerald-800 text-emerald-100" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {ag.voiceName}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ─── AGENT SELECTOR & EXPLICIT START SECTION (When Idle) ─── */}
         {state === "idle" && (
           <div className="px-5 pt-4 pb-4 shrink-0 bg-slate-50/70 border-b border-slate-100 flex flex-col gap-3">
@@ -493,7 +610,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 1. Select an Agent
               </span>
-              <span className="text-[10px] text-slate-400">Step 1 of 2</span>
+              <span className="text-[10px] text-slate-400">2 Independent Voice Agents</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -507,7 +624,16 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                       : "border-slate-200 bg-white/70 hover:border-slate-300"
                   }`}
                 >
-                  <div className="text-2xl mb-1">{ag.emoji}</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-2xl">{ag.emoji}</span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                      ag.voiceName.includes("Harika")
+                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                        : "bg-blue-50 text-blue-700 border-blue-200"
+                    }`}>
+                      {ag.voiceName}
+                    </span>
+                  </div>
                   <div className="font-heading text-xs font-bold text-slate-900 leading-tight">
                     {ag.name}
                   </div>
@@ -531,7 +657,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 className="w-full flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.99] group"
               >
                 <Play className="w-4 h-4 fill-current transition-transform group-hover:scale-110" />
-                <span>Start Conversation with {selectedAgent.name}</span>
+                <span>Start Conversation with {selectedAgent.name} ({selectedAgent.voiceName})</span>
                 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
               </button>
             </div>

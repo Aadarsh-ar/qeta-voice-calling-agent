@@ -317,8 +317,9 @@ export default function DashboardPage() {
       <TestAgentModal
         isOpen={isTestModalOpen}
         onClose={() => setIsTestModalOpen(false)}
-        agentId={selectedAgent?.id}
-        agentName={selectedAgent?.name}
+        agentId={selectedAgent?.id || activeAgent?.id}
+        agentName={selectedAgent?.name || activeAgent?.name}
+        cartesiaVoiceId={selectedAgent?.cartesiaVoiceId || activeAgent?.cartesiaVoiceId}
       />
 
       <RealPhoneCallModal

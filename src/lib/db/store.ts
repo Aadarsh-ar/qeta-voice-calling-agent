@@ -264,7 +264,7 @@ class DataStore {
       businessContext: "College of Engineering — Department of Computer Science & Engineering.",
       cartesiaVoiceId: "89907713-42ce-4ddd-8ff5-301211c564c1",
       cartesiaAgentId: "agent_minb6qwKNfwWXLV8gyRfRq",
-      cartesiaVoiceName: "Telugu Female Faculty Voice",
+      cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
       cartesiaModel: "sonic-3.6",
       llmModel: "gemini-2.5-flash",
       sarvamModel: "saaras:v3-realtime",

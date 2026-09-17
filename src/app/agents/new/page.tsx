@@ -97,6 +97,7 @@ export default function CreateAgentPage() {
   const [language, setLanguage] = useState<AgentLanguage>(AgentLanguage.TELUGU_ENGLISH);
   const [systemPrompt, setSystemPrompt] = useState(PRESETS[0].prompt);
   const [cartesiaAgentId, setCartesiaAgentId] = useState("");
+  const [cartesiaVoiceId, setCartesiaVoiceId] = useState("f9945b75-0f3b-448d-ba9e-3d22c229a68e");
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState("+91 80 7158 2667");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStep, setSaveStep] = useState<"idle" | "saving" | "syncing" | "ready" | "error">("idle");
@@ -142,6 +143,10 @@ export default function CreateAgentPage() {
       setSaveStep((cur) => (cur === "saving" ? "syncing" : cur));
     }, 250);
 
+    const voiceName = cartesiaVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
+      ? "Harika (Telugu Faculty Voice)"
+      : "AD (Cloned Telugu Voice)";
+
     try {
       const res = await fetch("/api/agents", {
         method: "POST",
@@ -150,8 +155,8 @@ export default function CreateAgentPage() {
           name: name.trim(),
           description: description.trim(),
           language,
-          cartesiaVoiceId: "ff480e6e-3e79-4307-9889-d1d9feb8e20e",
-          cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+          cartesiaVoiceId,
+          cartesiaVoiceName: voiceName,
           cartesiaAgentId: cartesiaAgentId.trim() || undefined,
           systemPrompt: systemPrompt.trim(),
           phoneNumber: selectedPhoneNumber,
@@ -354,11 +359,19 @@ export default function CreateAgentPage() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Voice Model</label>
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-900">AD (Cloned Telugu Voice)</span>
-                    <span className="text-[10px] text-indigo-600 font-mono">sonic-3.6</span>
-                  </div>
+                  <label className="block text-slate-700 font-semibold mb-1">Voice & Persona Voice ID</label>
+                  <select
+                    value={cartesiaVoiceId}
+                    onChange={(e) => setCartesiaVoiceId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 text-xs focus:outline-none focus:border-indigo-500 font-medium"
+                  >
+                    <option value="f9945b75-0f3b-448d-ba9e-3d22c229a68e">
+                      AD (Cloned Telugu Voice - Male)
+                    </option>
+                    <option value="89907713-42ce-4ddd-8ff5-301211c564c1">
+                      Harika (Telugu Faculty Voice - Female)
+                    </option>
+                  </select>
                 </div>
 
                 <div className="sm:col-span-2">

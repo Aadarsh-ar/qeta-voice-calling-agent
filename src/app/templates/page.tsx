@@ -264,11 +264,13 @@ export default function TemplatesPage() {
     name: string;
     greeting: string;
     systemPrompt?: string;
+    cartesiaVoiceId?: string;
     id?: string;
   }>({
     name: "College Academic Counselor",
     greeting: TEMPLATES[0].openingGreeting,
     systemPrompt: TEMPLATES[0].systemPrompt,
+    cartesiaVoiceId: TEMPLATES[0].voiceId,
   });
 
   const categories = [
@@ -343,6 +345,7 @@ export default function TemplatesPage() {
       name: template.name,
       greeting: template.openingGreeting,
       systemPrompt: template.systemPrompt,
+      cartesiaVoiceId: template.voiceId,
     });
     setIsVoiceTestOpen(true);
   };
@@ -548,6 +551,7 @@ export default function TemplatesPage() {
         isOpen={isVoiceTestOpen}
         onClose={() => setIsVoiceTestOpen(false)}
         agentName={voiceTestAgent.name}
+        cartesiaVoiceId={voiceTestAgent.cartesiaVoiceId}
         initialGreeting={voiceTestAgent.greeting}
         systemPrompt={voiceTestAgent.systemPrompt}
         instructions={voiceTestAgent.systemPrompt}
