@@ -281,13 +281,36 @@ export async function getCartesiaAgentDetails(agentId: string) {
   const apiKey = process.env.CARTESIA_API_KEY;
   if (!apiKey) throw new Error("No Cartesia API key");
 
-  const res = await fetch(`${CARTESIA_API_BASE}/agents/${agentId}`, {
+  let res = await fetch(`${CARTESIA_API_BASE}/agents/${agentId}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "X-API-Key": apiKey,
       "Cartesia-Version": CARTESIA_API_VERSION,
     },
   });
+
+  if (res.status === 404) {
+    try {
+      const listRes = await fetch(`${CARTESIA_API_BASE}/agents`, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-API-Key": apiKey,
+          "Cartesia-Version": CARTESIA_API_VERSION,
+        },
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const activeList = Array.isArray(listData) ? listData : (listData?.data || []);
+        const matched = activeList[0];
+        if (matched?.id) {
+          console.log(`[CARTESIA_AUTO_DISCOVER] Agent ${agentId} returned 404. Auto-recovered with active agent ${matched.id}`);
+          return matched;
+        }
+      }
+    } catch (listErr) {
+      console.warn(`[CARTESIA_AUTO_DISCOVER_WARN] Auto-discovery query failed:`, listErr);
+    }
+  }
 
   if (!res.ok) {
     const err = await res.text();
