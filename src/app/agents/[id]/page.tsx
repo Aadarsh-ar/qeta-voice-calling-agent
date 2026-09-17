@@ -369,17 +369,16 @@ export default function AgentDetailPage({
           lastSyncedAt: new Date().toLocaleTimeString(),
         });
         setSaveStep("ready");
-        showToast(`Ready • Synchronized with Cartesia! (Version: ${data.cartesiaVersionId || "Active"})`);
+        showToast("Changes saved successfully!");
         setTimeout(() => setSaveStep("idle"), 3500);
-        handleCheckDrift();
       } else {
-        const errorMsg = data.error || "Cartesia synchronization rejected configuration.";
+        const errorMsg = data.error || "Failed to update configuration.";
         setSaveStep("error");
         setSyncStatus({
           synced: false,
-          error: `Could not sync agent with Cartesia: ${errorMsg}`,
+          error: errorMsg,
         });
-        showToast(`Could not sync agent with Cartesia: ${errorMsg}`);
+        showToast(`Could not save changes: ${errorMsg}`);
         setTimeout(() => setSaveStep("idle"), 4500);
       }
     } catch (err: unknown) {
@@ -486,7 +485,7 @@ export default function AgentDetailPage({
       ) : saveStep === "syncing" ? (
         <>
           <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          Syncing with Cartesia...
+          Updating...
         </>
       ) : saveStep === "ready" ? (
         <>
@@ -602,112 +601,7 @@ export default function AgentDetailPage({
           </div>
         )}
 
-        {/* Official Cartesia Synchronization Status Banner */}
-        {syncStatus?.synced && (
-          <div className="p-4 rounded-xl bg-emerald-50/90 border border-emerald-300 text-emerald-950 text-xs flex items-center justify-between shadow-xs animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-900">Cartesia Agent Synchronized & Confirmed</div>
-                <div className="text-[11px] text-emerald-800 mt-0.5">
-                  Agent ID: <span className="font-mono font-bold text-indigo-700">{cartesiaAgentId}</span> • Version: <span className="font-mono">{syncStatus.cartesiaVersionId || "Active"}</span> • Synced: {syncStatus.lastSyncedAt}
-                </div>
-              </div>
-            </div>
-            <span className="px-2.5 py-1 rounded-md bg-emerald-200/70 text-emerald-900 text-[10px] font-bold uppercase tracking-wider">
-              Telephony Ready
-            </span>
-          </div>
-        )}
 
-        {syncStatus?.error && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-rose-950 text-xs flex items-center justify-between shadow-xs animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="font-bold text-rose-900">Cartesia Synchronization Failed</div>
-                <div className="text-[11px] text-rose-700 mt-0.5">
-                  {syncStatus.error} (Configuration was NOT marked as synchronized)
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => setSyncStatus(null)}
-              className="p-1 rounded-lg text-rose-500 hover:text-rose-800 hover:bg-rose-100 transition"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Section 10: Cartesia Drift Detection & Two-Way Sync Banner */}
-        {driftData?.hasDrift && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs shadow-xs animate-in fade-in space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 font-bold text-amber-900">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Configuration Drift Detected with Live Cartesia Runtime</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleSyncDirection("pull")}
-                  disabled={isSyncingDrift !== null}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition disabled:opacity-50 shadow-2xs"
-                  title="Overwrite local settings with live Cartesia agent"
-                >
-                  <ArrowDownToLine className="w-3.5 h-3.5" />
-                  {isSyncingDrift === "pull" ? "Pulling..." : "Pull from Cartesia"}
-                </button>
-                <button
-                  onClick={() => handleSyncDirection("push")}
-                  disabled={isSyncingDrift !== null}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 transition disabled:opacity-50 shadow-2xs"
-                  title="Overwrite live Cartesia agent with local settings"
-                >
-                  <ArrowUpToLine className="w-3.5 h-3.5" />
-                  {isSyncingDrift === "push" ? "Pushing..." : "Push to Cartesia"}
-                </button>
-              </div>
-            </div>
-            <div className="text-[11px] text-amber-850 space-y-1.5 pl-6">
-              <p className="font-medium text-slate-700">The following parameters differ between QETADOTIN and live Cartesia agent:</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
-                {driftData.differences.map((diff) => (
-                  <div key={diff.field} className="p-2.5 rounded-lg bg-white/90 border border-amber-200">
-                    <span className="font-bold uppercase text-[10px] text-amber-900 block mb-0.5">{diff.field}</span>
-                    <div className="text-[10px] text-slate-500 truncate" title={String(diff.qetaValue || "")}>
-                      <span className="font-semibold text-slate-700">Qeta:</span> {String(diff.qetaValue || "—")}
-                    </div>
-                    <div className="text-[10px] text-amber-900 truncate" title={String(diff.cartesiaValue || "")}>
-                      <span className="font-semibold text-amber-900">Cartesia:</span> {String(diff.cartesiaValue || "—")}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {driftData?.checked && !driftData.hasDrift && !driftData.error && (
-          <div className="px-4 py-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between shadow-2xs">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Cartesia Parity Verified • Local configuration perfectly matches live runtime.</span>
-            </div>
-            <button
-              onClick={handleCheckDrift}
-              disabled={isCheckingDrift}
-              className="text-[11px] text-emerald-700 hover:text-emerald-900 flex items-center gap-1 font-semibold"
-            >
-              <RefreshCw className={`w-3 h-3 ${isCheckingDrift ? "animate-spin" : ""}`} />
-              {isCheckingDrift ? "Checking..." : "Re-verify"}
-            </button>
-          </div>
-        )}
 
         {/* Back Link & Header Banner */}
         <div className="space-y-3">
@@ -876,9 +770,8 @@ export default function AgentDetailPage({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1 flex items-center justify-between">
-                    <span>Cartesia Voice Agent ID</span>
-                    <span className="text-[10px] text-indigo-600 font-mono font-normal">api.cartesia.ai</span>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Voice Agent Identifier
                   </label>
                   <input
                     type="text"
@@ -919,18 +812,18 @@ export default function AgentDetailPage({
                   </h4>
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">TTS Engine:</span>
-                      <span className="text-slate-900 font-semibold">Cartesia Sonic</span>
+                      <span className="text-slate-500">Voice Engine:</span>
+                      <span className="text-slate-900 font-semibold">Ultra-Low Latency Neural Stream</span>
                     </div>
                     <div className="flex items-center justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">Cloned Voice:</span>
+                      <span className="text-slate-500">Assigned Voice:</span>
                       <select
                         value={cartesiaVoiceId}
                         onChange={(e) => setCartesiaVoiceId(e.target.value)}
                         className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
                       >
                         <option value="f9945b75-0f3b-448d-ba9e-3d22c229a68e">
-                          AD (Cloned Telugu Voice - Male)
+                          AD (Telugu Voice - Male)
                         </option>
                         <option value="89907713-42ce-4ddd-8ff5-301211c564c1">
                           Harika (Telugu Faculty Voice - Female)
@@ -943,7 +836,7 @@ export default function AgentDetailPage({
                     </div>
                     <div className="flex justify-between py-1">
                       <span className="text-slate-500">STT Engine:</span>
-                      <span className="text-slate-900 font-semibold">Sarvam Saaras Realtime</span>
+                      <span className="text-slate-900 font-semibold">Groq Whisper Turbo (Indian Accents)</span>
                     </div>
                   </div>
                 </div>
@@ -997,7 +890,7 @@ export default function AgentDetailPage({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                   <span>Initial Greeting / Opening Message</span>
-                  <span className="text-[10px] text-indigo-600 font-mono font-normal">Cartesia initial_message</span>
+                  <span className="text-[10px] text-emerald-600 font-medium">Auto-play on pickup</span>
                 </label>
                 <input
                   type="text"
@@ -1007,7 +900,7 @@ export default function AgentDetailPage({
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-900 text-xs font-sans leading-relaxed focus:outline-none focus:border-indigo-500 focus:bg-white"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Spoken immediately upon call pickup by Cartesia with zero latency.
+                  Spoken immediately upon call pickup with zero latency.
                 </p>
               </div>
 
