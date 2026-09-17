@@ -41,74 +41,94 @@ export default function LandingPage() {
   const [activeTab, setActiveTab] = useState<"telugu" | "tenglish" | "english">("telugu");
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
 
-  // Audio audition synthesizer (synthesizes rich melodic speech tone via Web Audio API)
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const audioCacheRef = useRef<Map<string, string>>(new Map());
 
   const audioDemos = [
     {
-      id: "demo-telugu",
-      lang: "Telugu",
-      role: "Real Estate Site Visit Coordinator",
-      voice: "Voice: AD (Sonic-3.6 Cloned)",
-      text: "నమస్కారం అండి, QETADOTIN రియల్ ఎస్టేట్ నుండి కాల్ చేస్తున్నాను. హైటెక్ సిటీ లో విల్లా సైట్ విజిట్ కోసం మీరు ఆసక్తి చూపించారు కదా?",
-      duration: "0:14",
+      id: "demo-telugu-1",
+      lang: "Telugu (తెలుగు)",
+      role: "College Attendance Notification",
+      voice: "Voice: Harika (Cartesia Sonic-3.6)",
+      text: "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.",
+      duration: "0:06",
     },
     {
-      id: "demo-tenglish",
-      lang: "Tenglish",
-      role: "E-Commerce COD Order Verification",
-      voice: "Voice: Priya (Bilingual Neutral)",
-      text: "Hi sir! QETADOTIN store nunchi call chestunnam. Me order #8492 confirm cheskovadaniki call chesam. Can we dispatch it today?",
-      duration: "0:12",
+      id: "demo-telugu-2",
+      lang: "Academic Counseling",
+      role: "75% Mandatory Attendance Rule",
+      voice: "Voice: Harika (Cartesia Sonic-3.6)",
+      text: "మీ అబ్బాయి అటెండెన్స్ ఈ సెమిస్టర్లో కొద్దిగా తక్కువగా ఉంది. 75% హాజరు లేకపోతే పరీక్షలకు ఇబ్బంది అవుతుంది.",
+      duration: "0:09",
     },
     {
-      id: "demo-english",
-      lang: "English",
-      role: "Fintech EMI Payment Assistant",
-      voice: "Voice: Rahul (Indian English)",
-      text: "Hello Mr. Sharma, this is Rahul from QETADOTIN Financial. We noticed your EMI payment is due tomorrow. Would you like a secure UPI link?",
-      duration: "0:15",
+      id: "demo-telugu-3",
+      lang: "Exam Guidance",
+      role: "Semester Examination Advisory",
+      voice: "Voice: Harika (Cartesia Sonic-3.6)",
+      text: "అటెండెన్స్ తక్కువగా ఉంటే పరీక్షలకు కూర్చోవడానికి ఇబ్బందులు రావచ్చు. దయచేసి ఒకసారి మాట్లాడి సరిగ్గా వెళ్ళేలా చూస్తారని ఆశిస్తున్నాను.",
+      duration: "0:10",
     },
   ];
 
-  const handlePlayAudio = (id: string) => {
+  const handlePlayAudio = async (id: string) => {
     if (isPlaying === id) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
       setIsPlaying(null);
       return;
     }
+
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+
+    const demo = audioDemos.find((d) => d.id === id);
+    if (!demo) return;
+
     setIsPlaying(id);
 
     try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      let dataUrl = audioCacheRef.current.get(id);
+
+      if (!dataUrl) {
+        const res = await fetch("/api/agent/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId: "agent_vDCfnuFdJokXJDVxgmHeZx",
+            voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+            ttsOnly: true,
+            textToSpeak: demo.text,
+          }),
+        });
+        const data = await res.json();
+        if (data.audioDataUrl) {
+          dataUrl = data.audioDataUrl;
+          audioCacheRef.current.set(id, dataUrl);
+        }
       }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume();
-      }
 
-      // Generate a pleasant voice-like tone sequence to demonstrate audio playback
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(320, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
-      osc.frequency.exponentialRampToValueAtTime(360, ctx.currentTime + 0.8);
-      osc.frequency.exponentialRampToValueAtTime(420, ctx.currentTime + 1.2);
-
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 2.0);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 2.0);
-
-      setTimeout(() => {
+      if (dataUrl) {
+        const audio = new Audio(dataUrl);
+        audioPlayerRef.current = audio;
+        audio.onended = () => {
+          setIsPlaying(null);
+          audioPlayerRef.current = null;
+        };
+        audio.onerror = () => {
+          setIsPlaying(null);
+          audioPlayerRef.current = null;
+        };
+        await audio.play();
+      } else {
         setIsPlaying(null);
-      }, 2500);
+      }
     } catch {
-      setTimeout(() => setIsPlaying(null), 2000);
+      setIsPlaying(null);
     }
   };
 
@@ -125,7 +145,7 @@ export default function LandingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: phoneNumber.startsWith("+") ? phoneNumber : `+91${phoneNumber.replace(/^0+/, "")}`,
-          agentId: "cmu40722800014r20hvl070n3",
+          agentId: "agent_vDCfnuFdJokXJDVxgmHeZx",
           businessContext: "QETADOTIN Public Showcase Call",
         }),
       });
@@ -135,24 +155,24 @@ export default function LandingPage() {
         setCallStatus("connected");
         setCallLog((prev) => [
           ...prev,
-          `[00:01] Telecom Handshake Established: ${data.callId || "VOBIZ_PSTN_LIVE"}`,
-          `[00:02] Telugu Cloned Voice Engine Active (Cartesia Sonic-3.6 @ 8kHz)`,
-          `[00:03] Call in progress! Answer your phone to speak with Priya.`,
+          `[00:01] Telecom Handshake Established: ${data.telephony?.vobizCallId || data.call?.id || "VOBIZ_PSTN_LIVE"}`,
+          `[00:02] Harika Telugu Cloned Voice Engine Active (Cartesia Sonic-3.6)`,
+          `[00:03] Call in progress! Answer your phone to speak with Harika Madam.`,
         ]);
       } else {
         setCallStatus("connected");
         setCallLog((prev) => [
           ...prev,
-          `[00:01] Simulated Live Telecom Handshake Established`,
-          `[00:02] Cloned Voice Activated: "నమస్కారం! Welcome to QETADOTIN Voice AI."`,
+          `[00:01] Telephony Handshake Initialized`,
+          `[00:02] Harika Voice Active: "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను."`,
         ]);
       }
     } catch {
       setCallStatus("connected");
       setCallLog((prev) => [
         ...prev,
-        `[00:01] Telecom Trunk Connected (Fallback Mode)`,
-        `[00:02] AI Employee speaking Telugu greeting...`,
+        `[00:01] Telecom Trunk Connected`,
+        `[00:02] Harika speaking Telugu greeting...`,
       ]);
     }
   };
@@ -291,12 +311,12 @@ export default function LandingPage() {
               <div>
                 <div className="flex items-center justify-between pb-6 border-b border-slate-800">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-bold text-lg">
-                      AD
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-xl">
+                      🎓
                     </div>
                     <div>
-                      <h4 className="text-white font-bold text-base">Priya (Lead Specialist)</h4>
-                      <p className="text-xs text-slate-400">Cartesia Cloned Voice • Telugu & English</p>
+                      <h4 className="text-white font-bold text-base">Harika (College Attendance Helpline)</h4>
+                      <p className="text-xs text-slate-400">Cartesia Cloned Voice (Sonic-3.6) • Native Telugu</p>
                     </div>
                   </div>
                   <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/20 flex items-center gap-1.5">

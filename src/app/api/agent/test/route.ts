@@ -7,6 +7,24 @@ import path from "path";
 
 export const dynamic = "force-dynamic";
 
+function createWavHeader(dataLength: number, sampleRate = 16000, channels = 1, bitsPerSample = 16): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(dataLength + 36, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM format
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * (bitsPerSample / 8), 28);
+  header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataLength, 40);
+  return header;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -128,14 +146,15 @@ export async function POST(req: Request) {
       agent.cartesiaVoiceName = "Harika (Telugu Faculty Voice)";
     }
 
-    // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, etc.)
+    // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, showcase auditions)
     if (body.ttsOnly) {
       const textToSynthesize = (body.textToSpeak || userMessage || "").trim();
       let audioBase64: string | null = null;
+      let audioDataUrl: string | null = null;
       let audioBytes = 0;
       if (cartesiaClient.isConfigured() && textToSynthesize) {
         try {
-          console.log(`[TEST_ROUTE_TTS_ONLY] Synthesizing for "${agent?.name || cleanId}" | Voice: ${effectiveVoiceId} (${effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1" ? "Harika" : "AD"})`);
+          console.log(`[TEST_ROUTE_TTS_ONLY] Synthesizing for "${agent?.name || cleanId}" | Voice: ${effectiveVoiceId} (Harika)`);
           const audioBuffer = await cartesiaClient.synthesize({
             transcript: textToSynthesize,
             voiceId: effectiveVoiceId,
@@ -145,6 +164,8 @@ export async function POST(req: Request) {
           });
           if (audioBuffer && audioBuffer.byteLength > 0) {
             audioBase64 = Buffer.from(audioBuffer).toString("base64");
+            const wavBuffer = Buffer.concat([createWavHeader(audioBuffer.byteLength, 16000, 1, 16), Buffer.from(audioBuffer)]);
+            audioDataUrl = `data:audio/wav;base64,${wavBuffer.toString("base64")}`;
             audioBytes = audioBuffer.byteLength;
           }
         } catch (e: any) {
@@ -156,6 +177,7 @@ export async function POST(req: Request) {
         normalizedReply: textToSynthesize,
         rawReply: textToSynthesize,
         audioBase64,
+        audioDataUrl,
         audioBytes,
         agentId: agent?.id,
         agentName: agent?.name,
@@ -215,6 +237,7 @@ export async function POST(req: Request) {
     // Run Cartesia TTS Synthesis using cloned voice
     let ttsLatencyMs = 120;
     let audioBase64: string | null = null;
+    let audioDataUrl: string | null = null;
     let audioBytes = 0;
 
     if (cartesiaClient.isConfigured()) {
@@ -235,8 +258,10 @@ export async function POST(req: Request) {
         ttsLatencyMs = Date.now() - ttsStart;
         audioBytes = audioBuffer ? audioBuffer.byteLength : 0;
 
-        if (audioBytes > 0) {
+        if (audioBytes > 0 && audioBuffer) {
           audioBase64 = Buffer.from(audioBuffer).toString("base64");
+          const wavBuffer = Buffer.concat([createWavHeader(audioBuffer.byteLength, 16000, 1, 16), Buffer.from(audioBuffer)]);
+          audioDataUrl = `data:audio/wav;base64,${wavBuffer.toString("base64")}`;
           console.log(`[TEST_ROUTE_TTS] Success: ${audioBytes} audio bytes generated in ${ttsLatencyMs}ms`);
         } else {
           console.error(`[TEST_ROUTE_TTS] FAILED: Cartesia returned 0 audio bytes`);
@@ -279,8 +304,9 @@ export async function POST(req: Request) {
       qualityValidation: turnResult.qualityValidation,
       cartesiaVoiceId: effectiveVoiceId,
       audioBase64,
+      audioDataUrl,
       audioBytes,
-      audioFormat: "audio/x-l16",
+      audioFormat: "audio/wav",
       sampleRate: 16000,
       latencies: {
         sttMs: sttLatencyMs,

@@ -21,6 +21,7 @@ import {
 import { LandingHeader } from "@/components/landing/LandingHeader";
 import { HeroVisual } from "@/components/landing/HeroVisual";
 import { HeroValueStrip } from "@/components/landing/HeroValueStrip";
+import { LiveVoiceShowcase } from "@/components/landing/LiveVoiceShowcase";
 import { LiveAgentAudioModal } from "@/components/landing/LiveAgentAudioModal";
 import { Logo } from "@/components/brand/Logo";
 
@@ -91,6 +92,9 @@ export default function HomePage() {
 
       {/* ─── 3. Hero Value Strip (4 Metric Columns with Separators) ─── */}
       <HeroValueStrip />
+
+      {/* ─── 3.5. Live Voice Audition & Telephony Showcase ─── */}
+      <LiveVoiceShowcase onOpenLiveModal={() => setIsAudioModalOpen(true)} />
 
       {/* ─── 4. Product Section: Enterprise Voice Solutions ─── */}
       <section id="solutions" className="py-20 lg:py-28 bg-white border-b border-[#EAEBE8]">
