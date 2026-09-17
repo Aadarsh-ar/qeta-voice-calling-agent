@@ -541,8 +541,9 @@ function sendAudioToVobiz(ws, streamId, rawAudioBuf) {
 
   const audioBuf = rawAudioBuf;
 
-  // 40ms chunks: 320 bytes at 8000Hz 8-bit mono μ-law (8000 bytes/sec)
-  const CHUNK_SIZE = 320;
+  // 160ms chunks: 1280 bytes at 8000Hz 8-bit mono μ-law (8000 bytes/sec)
+  // Consolidating 40ms micro-slices into 160ms solid audio frames prevents packet drops and telephony buffer jitter
+  const CHUNK_SIZE = 1280;
   let frameCount = 0;
   let totalBytes = 0;
 
@@ -633,9 +634,13 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
   let firstAudioReceivedTs = null;
   let lastAudioReceivedTs = null;
 
-  // Acoustic echo prevention: track when agent is actively sending audio to phone
+  // Acoustic echo prevention & speech stabilization: track when agent is actively sending audio to phone
   let isAgentOutputtingAudio = false;
   let agentAudioEndTimer = null;
+  let consecutiveCallerSpeechFrames = 0;
+  let hasConfirmedInterruption = false;
+  let audioJitterBuffer = [];
+  let audioJitterFlushTimer = null;
 
   // Track in activeCallStates
   activeCallStates.set(streamId, {
@@ -735,8 +740,11 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
         const payload = msg.media?.payload || msg.audio || msg.data;
         if (!payload) return;
 
+        const rawChunk = Buffer.from(payload, "base64");
+        audioJitterBuffer.push(rawChunk);
+
         framesSent++;
-        const chunkBytes = Buffer.from(payload, "base64").length;
+        const chunkBytes = rawChunk.length;
         bytesSent += chunkBytes;
         if (!firstAudioSentTs) {
           firstAudioSentTs = new Date().toISOString();
@@ -751,10 +759,11 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
         lastAudioSentTs = new Date().toISOString();
         isAgentOutputtingAudio = true;
         if (agentAudioEndTimer) clearTimeout(agentAudioEndTimer);
-        // Guard window: keep echo suppression active for 400ms after last audio frame
+        // Guard window: keep echo suppression active for 450ms after last audio frame
         agentAudioEndTimer = setTimeout(() => {
           isAgentOutputtingAudio = false;
-        }, 400);
+          consecutiveCallerSpeechFrames = 0;
+        }, 450);
 
         const state = activeCallStates.get(streamId);
         if (state) {
@@ -764,21 +773,41 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
           state.lastAudioTimestamp = lastAudioSentTs;
         }
 
-        if (vobizWs.readyState === 1) {
-          vobizWs.send(
-            JSON.stringify({
-              event: "playAudio",
-              streamId,
-              media: {
-                contentType: "audio/x-mulaw",
-                sampleRate: 8000,
-                payload,
-              },
-            })
-          );
-          if (framesSent === 1 || framesSent === 5 || framesSent % 25 === 0) {
-            console.log(`[CARTESIA_AUDIO_DELIVERED] frame #${framesSent}, chunk=${chunkBytes}B, totalSent=${bytesSent}B`);
+        // Consolidated Delivery: Consolidate 2 Cartesia frames (640 bytes / 80ms) before sending to Vobiz.
+        // This eliminates under-run packet jitter and gives the telephony gateway smooth audio continuity.
+        const flushAudioBuffer = (force = false) => {
+          if (audioJitterFlushTimer) {
+            clearTimeout(audioJitterFlushTimer);
+            audioJitterFlushTimer = null;
           }
+          if (audioJitterBuffer.length >= 2 || (force && audioJitterBuffer.length > 0)) {
+            const combined = Buffer.concat(audioJitterBuffer);
+            audioJitterBuffer = [];
+            if (vobizWs.readyState === 1) {
+              vobizWs.send(
+                JSON.stringify({
+                  event: "playAudio",
+                  streamId,
+                  media: {
+                    contentType: "audio/x-mulaw",
+                    sampleRate: 8000,
+                    payload: combined.toString("base64"),
+                  },
+                })
+              );
+            }
+          }
+        };
+
+        if (audioJitterBuffer.length >= 2) {
+          flushAudioBuffer();
+        } else {
+          // Safety timeout to ensure trailing frame is never stuck
+          audioJitterFlushTimer = setTimeout(() => flushAudioBuffer(true), 45);
+        }
+
+        if (framesSent === 1 || framesSent === 5 || framesSent % 25 === 0) {
+          console.log(`[CARTESIA_AUDIO_DELIVERED] frame #${framesSent}, chunk=${chunkBytes}B, totalSent=${bytesSent}B`);
         }
       }
 
@@ -794,20 +823,28 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
         }
       }
 
-      // Instant Zero-Latency Barge-In Interruption (Guarded: ignore initial line clicks < 1.8s)
+      // Robust Barge-In Interruption (Guarded: ignore initial line clicks and ensure sustained caller speech)
       else if (msg.event === "audio_output_clear" || msg.type === "audio_output_clear" || msg.event === "interruption" || msg.type === "interruption" || msg.event === "turn_interrupted") {
         const elapsedSinceStart = Date.now() - streamStartTime;
-        if (elapsedSinceStart > 1800) {
-          console.log("[CARTESIA_AGENT] Barge-in detected — clearing telephony playback buffer immediately");
+        // Require at least 2.2 seconds elapsed and verified caller speech to prevent line clicks/echo from cutting the voice
+        if (elapsedSinceStart > 2200 && (hasConfirmedInterruption || consecutiveCallerSpeechFrames >= 2)) {
+          console.log("[CARTESIA_AGENT] Verified caller barge-in — clearing telephony playback buffer");
           try {
             if (vobizWs.readyState === 1) {
               vobizWs.send(JSON.stringify({ event: "clearAudio", streamId }));
             }
           } catch {}
+          hasConfirmedInterruption = false;
+          consecutiveCallerSpeechFrames = 0;
+          audioJitterBuffer = [];
+          if (audioJitterFlushTimer) {
+            clearTimeout(audioJitterFlushTimer);
+            audioJitterFlushTimer = null;
+          }
           const state = activeCallStates.get(streamId);
           if (state) state.stage = "LISTENING";
         } else {
-          console.log(`[CARTESIA_AGENT] Guarded early audio_output_clear (${elapsedSinceStart}ms) to preserve greeting`);
+          console.log(`[CARTESIA_AGENT] Guarded premature audio_output_clear (${elapsedSinceStart}ms, verified=${hasConfirmedInterruption}) — speech preserved`);
         }
       }
 
@@ -875,14 +912,25 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
 
       if (cartesiaWs.readyState !== 1) return;
 
-      // Acoustic echo suppression: prevent speakerphone and line echo of the agent's own
-      // voice from being piped back to Cartesia, which would cause recursive self-listening!
+      // Acoustic echo suppression & robust speech interruption verification:
+      // Prevent speakerphone and line noise from being piped back to Cartesia, which cuts the agent's voice!
       if (isAgentOutputtingAudio) {
         const rms = calculateRms(mulawChunk);
-        if (rms < 1100) {
-          return; // Drop echo
+        // Indian PSTN / mobile lines have background line noise up to 1350 RMS.
+        // Require sustained human vocal energy (> 1400 RMS) for at least 4 consecutive frames (~160ms).
+        if (rms > 1400) {
+          consecutiveCallerSpeechFrames++;
+        } else {
+          consecutiveCallerSpeechFrames = Math.max(0, consecutiveCallerSpeechFrames - 1);
         }
-        console.log(`[CARTESIA_ECHO_GUARD] Genuine caller speech detected during AI playback (rms=${Math.round(rms)})`);
+
+        if (consecutiveCallerSpeechFrames < 4) {
+          return; // Drop echo and transient line clicks from cutting AI speech
+        }
+        hasConfirmedInterruption = true;
+        console.log(`[CARTESIA_ECHO_GUARD] Genuine caller speech interruption confirmed (${consecutiveCallerSpeechFrames} frames, rms=${Math.round(rms)})`);
+      } else {
+        consecutiveCallerSpeechFrames = 0;
       }
 
       if (!cartesiaReady) {
@@ -904,6 +952,7 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
     close: () => {
       clearInterval(cartesiaPing);
       if (agentAudioEndTimer) clearTimeout(agentAudioEndTimer);
+      if (audioJitterFlushTimer) clearTimeout(audioJitterFlushTimer);
       try { cartesiaWs.close(1000, "Call ended"); } catch {}
     },
     isReady: () => cartesiaReady && cartesiaWs.readyState === 1,
@@ -918,11 +967,10 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
   };
 }
 
-// sendAudioToVobizRaw — like sendAudioToVobiz but skips office ambience mixing
-// (used when Cartesia already has ambience baked into its output)
+// sendAudioToVobizRaw — sends consolidated audio blocks without micro-packet fragmentation
 function sendAudioToVobizRaw(ws, streamId, audioBuf) {
   if (!ws || ws.readyState !== 1 || !streamId || !audioBuf || audioBuf.length === 0) return;
-  const CHUNK_SIZE = 320;
+  const CHUNK_SIZE = 1280;
   for (let offset = 0; offset < audioBuf.length; offset += CHUNK_SIZE) {
     if (ws.readyState !== 1) break;
     const chunk = audioBuf.subarray(offset, Math.min(offset + CHUNK_SIZE, audioBuf.length));

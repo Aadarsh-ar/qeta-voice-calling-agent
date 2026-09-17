@@ -80,6 +80,9 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     llm_introduce: finalGreeting,
     tts_voice: voiceId,
     tts_language: languageCode,
+    background_sound_file_id: null,
+    background_volume: 0,
+    noise_suppression_level: 0,
   };
 
   const hasExistingAgent = Boolean(params.cartesiaAgentId && params.cartesiaAgentId.trim().startsWith("agent_"));
