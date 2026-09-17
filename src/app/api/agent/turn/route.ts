@@ -3,6 +3,8 @@ import { agentOrchestrator } from "@/lib/agent/orchestrator";
 import { dataStore, AgentItem } from "@/lib/db/store";
 import { prisma } from "@/lib/db/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();

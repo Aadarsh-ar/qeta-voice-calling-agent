@@ -5,15 +5,22 @@ declare global {
   var prismaGlobal: PrismaClient | undefined;
 }
 
-export const prisma =
-  globalThis.prismaGlobal ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  });
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.prismaGlobal = prisma;
+function getPrismaClient(): PrismaClient {
+  if (!globalThis.prismaGlobal) {
+    globalThis.prismaGlobal = new PrismaClient({
+      log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    });
+  }
+  return globalThis.prismaGlobal;
 }
+
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop: string | symbol) {
+    const client = getPrismaClient();
+    const value = (client as Record<string | symbol, unknown>)[prop];
+    return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(client) : value;
+  },
+});
 
 export async function isDatabaseConnected(): Promise<boolean> {
   if (!process.env.DATABASE_URL) return false;
