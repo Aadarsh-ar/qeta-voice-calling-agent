@@ -1,0 +1,7 @@
+tunnel: 62fb21be-2c7d-4a8e-9c92-9d0abbfcce08
+credentials-file: C:\Users\theaa\.cloudflared\62fb21be-2c7d-4a8e-9c92-9d0abbfcce08.json
+
+ingress:
+  - hostname: voice.qeta.in
+    service: http://localhost:3000
+  - service: http_status:404

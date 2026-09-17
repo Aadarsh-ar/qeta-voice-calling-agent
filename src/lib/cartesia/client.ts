@@ -1,0 +1,132 @@
+/**
+ * Cartesia Sonic Client
+ * Handles voice synthesis, cloned voice verification, and WebSocket streaming.
+ */
+
+export interface CartesiaVoice {
+  id: string;
+  name: string;
+  description?: string;
+  language: string;
+  is_public: boolean;
+  status: string;
+}
+
+export class CartesiaClient {
+  private apiKey: string;
+  private version: string = "2024-06-10";
+  private baseUrl: string = "https://api.cartesia.ai";
+
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || process.env.CARTESIA_API_KEY || "";
+  }
+
+  isConfigured(): boolean {
+    return Boolean(this.apiKey && this.apiKey.startsWith("sk_car_"));
+  }
+
+  /**
+   * List all voices accessible by the account
+   */
+  async listVoices(): Promise<CartesiaVoice[]> {
+    if (!this.isConfigured()) {
+      throw new Error("Cartesia API key is missing or invalid.");
+    }
+
+    const res = await fetch(`${this.baseUrl}/voices`, {
+      headers: {
+        "X-API-Key": this.apiKey,
+        "Cartesia-Version": this.version,
+      },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to fetch Cartesia voices (${res.status}): ${errText}`);
+    }
+
+    return (await res.json()) as CartesiaVoice[];
+  }
+
+  /**
+   * Get custom cloned voices
+   */
+  async getClonedVoices(): Promise<CartesiaVoice[]> {
+    const all = await this.listVoices();
+    return all.filter((v) => !v.is_public);
+  }
+
+  /**
+   * Verify if a specific voice ID exists and is active
+   */
+  async verifyVoice(voiceId: string): Promise<CartesiaVoice | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/voices/${voiceId}`, {
+        headers: {
+          "X-API-Key": this.apiKey,
+          "Cartesia-Version": this.version,
+        },
+      });
+      if (res.ok) {
+        return (await res.json()) as CartesiaVoice;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Synthesize speech via REST API (audio/wav or raw pcm)
+   */
+  async synthesize(params: {
+    transcript: string;
+    voiceId: string;
+    modelId?: string;
+    sampleRate?: number;
+    encoding?: "pcm_s16le" | "pcm_f32le" | "pcm_mulaw";
+  }): Promise<ArrayBuffer> {
+    if (!this.isConfigured()) {
+      throw new Error("Cartesia API key is not configured.");
+    }
+
+    const payload = {
+      model_id: params.modelId || "sonic-3.6",
+      transcript: params.transcript,
+      voice: {
+        mode: "id",
+        id: params.voiceId,
+      },
+      output_format: {
+        container: "raw",
+        encoding: params.encoding || "pcm_s16le",
+        sample_rate: params.sampleRate || 16000,
+      },
+    };
+
+    const t0 = Date.now();
+    const res = await fetch(`${this.baseUrl}/tts/bytes`, {
+      method: "POST",
+      headers: {
+        "X-API-Key": this.apiKey,
+        "Cartesia-Version": this.version,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const latencyMs = Date.now() - t0;
+    const contentType = res.headers.get("content-type") || "unknown";
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[CARTESIA_TTS_DIAGNOSTIC] FAILED HTTP ${res.status} | Content-Type: ${contentType} | Latency: ${latencyMs}ms | Voice: ${params.voiceId} | Error: ${errText}`);
+      throw new Error(`Cartesia synthesis failed (${res.status}): ${errText}`);
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    console.log(`[CARTESIA_TTS_DIAGNOSTIC] SUCCESS HTTP ${res.status} | Content-Type: ${contentType} | Latency: ${latencyMs}ms | Bytes: ${arrayBuffer.byteLength} | Voice: ${params.voiceId}`);
+    return arrayBuffer;
+  }
+}
+
+export const cartesiaClient = new CartesiaClient();

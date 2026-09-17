@@ -1,0 +1,399 @@
+// Prisma Schema for Vaani AI Multi-Tenant SaaS
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum IntegrationProvider {
+  VOBIZ
+  SARVAM
+  OPENAI
+  CARTESIA
+  POSTGRESQL
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  NOT_CONNECTED
+  ERROR
+}
+
+enum AgentLanguage {
+  TELUGU
+  TELUGU_ENGLISH
+  ENGLISH
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  INITIALIZING
+  CONNECTING
+  ACTIVE
+  LISTENING
+  THINKING
+  SPEAKING
+  INTERRUPTED
+  ENDING
+  COMPLETED
+  FAILED
+}
+
+enum MessageRole {
+  CALLER
+  AI
+  SYSTEM
+  TOOL
+}
+
+model Organization {
+  id              String            @id @default(cuid())
+  name            String
+  slug            String            @unique
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  users           User[]
+  agents          Agent[]
+  phoneNumbers    PhoneNumber[]
+  integrations    Integration[]
+  calls           Call[]
+  businessProfile BusinessProfile?
+  businesses      Business[]
+  pricingRules    ProviderPricing[]
+  customers       Customer[]
+  orders          Order[]
+
+  @@index([slug])
+}
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  email          String       @unique
+  name           String?
+  role           Role         @default(MEMBER)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model BusinessProfile {
+  id              String       @id @default(cuid())
+  organizationId  String       @unique
+  businessName    String
+  description     String?      @db.Text
+  productsServices String?     @db.Text
+  workingHours    String?
+  location        String?
+  contactInfo     String?
+  faqs            Json?        // List of { question: string, answer: string }
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id              String              @id @default(cuid())
+  organizationId  String
+  provider        IntegrationProvider
+  status          IntegrationStatus   @default(NOT_CONNECTED)
+  apiKeyMasked    String?             // Only masked preview (e.g. sk_car_•••••2ujU)
+  secretMasked    String?
+  config          Json?               // Store non-sensitive metadata (e.g., default voice ID, endpoints)
+  lastCheckedAt   DateTime?
+  errorMessage    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+}
+
+model Agent {
+  id               String        @id @default(cuid())
+  organizationId   String
+  name             String
+  description      String?
+  instructions     String?       @db.Text
+  language         AgentLanguage @default(TELUGU_ENGLISH)
+  status           AgentStatus   @default(ACTIVE)
+  systemPrompt     String        @db.Text
+  businessContext  String?       @db.Text
+  cartesiaVoiceId  String?       // Defaults to cloned voice "ff480e6e-3e79-4307-9889-d1d9feb8e20e"
+  cartesiaAgentId  String?       // Cartesia Agent ID (agent_xxx)
+  cartesiaModel    String        @default("sonic-3.6")
+  llmModel         String        @default("gemini-2.5-flash")
+  temperature      Float         @default(0.4)
+  sarvamModel      String        @default("saaras:v3-realtime")
+  sarvamLanguage   String        @default("te-IN")
+  phoneNumberId    String?       @unique
+  businessId       String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  phoneNumber      PhoneNumber?  @relation(fields: [phoneNumberId], references: [id])
+  business         Business?     @relation(fields: [businessId], references: [id])
+  tools            AgentTool[]
+  knowledge        AgentKnowledge[]
+  calls            Call[]
+
+  @@index([organizationId])
+  @@index([cartesiaAgentId])
+  @@index([organizationId, status])
+  @@index([status])
+}
+
+model Business {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  name               String
+  description        String?      @db.Text
+  information        String?      @db.Text
+  contactInformation String?
+  operatingHours     String?
+  address            String?
+  website            String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agents             Agent[]
+
+  @@index([organizationId])
+}
+
+model AgentKnowledge {
+  id          String   @id @default(cuid())
+  agentId     String
+  title       String
+  content     String   @db.Text
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([agentId, createdAt])
+}
+
+model AgentTool {
+  id            String   @id @default(cuid())
+  agentId       String
+  name          String   // e.g. "end_call", "transfer_call", "capture_customer_details"
+  description   String
+  configuration Json?
+  parameters    Json?
+  enabled       Boolean  @default(true)
+  isEnabled     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, name])
+  @@index([agentId])
+  @@index([agentId, isEnabled])
+}
+
+model PhoneNumber {
+  id             String       @id @default(cuid())
+  organizationId String
+  e164Number     String       @unique // e.g. +918012345678
+  provider       String       @default("Vobiz")
+  status         String       @default("Active") // Active, Inactive, Pending
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedAgent  Agent?
+
+  @@index([organizationId])
+}
+
+model Call {
+  id              String             @id @default(cuid())
+  organizationId  String
+  agentId         String?
+  vobizCallId     String?            @unique
+  streamId        String?
+  callerNumber    String
+  agentNumber     String
+  direction       CallDirection      @default(INBOUND)
+  status          CallStatus         @default(INITIALIZING)
+  startedAt       DateTime           @default(now())
+  endedAt         DateTime?
+  durationSeconds Int                @default(0)
+  endReason       String?
+  totalCost       Decimal            @default(0.0) @db.Decimal(10, 4)
+  currency        String             @default("INR")
+  recordingUrl    String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent           Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  participants    CallParticipant[]
+  transcripts     TranscriptMessage[]
+  summary         CallSummary?
+  usage           Usage?
+
+  @@index([organizationId])
+  @@index([agentId])
+  @@index([startedAt])
+  @@index([callerNumber])
+  @@index([status])
+  @@index([createdAt])
+  @@index([organizationId, status])
+}
+
+model CallParticipant {
+  id        String      @id @default(cuid())
+  callId    String
+  role      MessageRole
+  identifier String     // Phone number or Agent Name
+  createdAt DateTime    @default(now())
+
+  call      Call        @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+}
+
+model TranscriptMessage {
+  id             String      @id @default(cuid())
+  callId         String
+  role           MessageRole
+  content        String      @db.Text
+  normalizedText String?     @db.Text
+  timestampMs    Int         // Relative milliseconds since call start
+  sttLatencyMs   Int?
+  llmLatencyMs   Int?
+  ttsLatencyMs   Int?
+  wasInterrupted Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  call           Call        @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([timestampMs])
+}
+
+model CallSummary {
+  id               String   @id @default(cuid())
+  callId           String   @unique
+  summary          String   @db.Text
+  customerIntent   String?
+  outcome          String?
+  importantInfo    String?  @db.Text
+  followUpRequired Boolean  @default(false)
+  followUpDetails  String?
+  capturedDetails  Json?    // e.g. { name: "Rajesh", requirement: "Enterprise demo", email: "..." }
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  call             Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+}
+
+model Usage {
+  id              String   @id @default(cuid())
+  callId          String   @unique
+  durationSeconds Int      @default(0)
+  sttAudioSeconds Float    @default(0.0)
+  llmInputTokens  Int      @default(0)
+  llmOutputTokens Int      @default(0)
+  ttsCharacters   Int      @default(0)
+  vobizCost       Decimal  @default(0.0) @db.Decimal(10, 4)
+  sarvamCost      Decimal  @default(0.0) @db.Decimal(10, 4)
+  openaiCost      Decimal  @default(0.0) @db.Decimal(10, 4)
+  cartesiaCost    Decimal  @default(0.0) @db.Decimal(10, 4)
+  infraCost       Decimal  @default(0.0) @db.Decimal(10, 4)
+  totalCost       Decimal  @default(0.0) @db.Decimal(10, 4)
+  currency        String   @default("INR")
+  createdAt       DateTime @default(now())
+
+  call            Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+}
+
+model ProviderPricing {
+  id             String              @id @default(cuid())
+  organizationId String
+  provider       IntegrationProvider
+  metricUnit     String              // "minute", "second", "1k_input_tokens", "1k_output_tokens", "1k_characters"
+  rate           Decimal             @db.Decimal(10, 5)
+  currency       String              @default("INR")
+  effectiveDate  DateTime            @default(now())
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  phoneNumber    String
+  name           String?
+  email          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, phoneNumber])
+  @@index([organizationId])
+  @@index([phoneNumber])
+  @@index([createdAt])
+}
+
+model Order {
+  id               String       @id @default(cuid())
+  orderId          String       @unique // e.g. "4567", "ORD-8421"
+  organizationId   String
+  customerId       String?
+  phoneNumber      String
+  items            String
+  status           String       // "In Transit", "Delivered", "Processing"
+  courier          String?      // "Ekart Logistics", "BlueDart"
+  expectedDelivery String?      // "Tomorrow (రేపు) by 2:00 PM"
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([orderId])
+  @@index([phoneNumber])
+  @@index([status])
+  @@index([createdAt])
+}

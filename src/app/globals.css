@@ -1,26 +1,225 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #FAFAF8;
+  --foreground: #0A0D12;
+  --card-bg: #FFFFFF;
+  --card-border: #E8EAE6;
+  --card-border-hover: #D5D8D0;
+  --emerald-950: #022C22;
+  --emerald-900: #064E3B;
+  --emerald-800: #065F46;
+  --emerald-700: #047857;
+  --emerald-600: #059669;
+  --emerald-500: #10B981;
+  --emerald-400: #34D399;
+  --emerald-100: #D1FAE5;
+  --emerald-50: #ECFDF5;
+  --accent-primary: #065F46;
+  --accent-glow: rgba(5, 150, 105, 0.08);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.018em;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: "Plus Jakarta Sans", "Outfit", sans-serif;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+
+code, kbd, samp, pre, .font-mono {
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: -0.02em;
+}
+
+/* Reference Design System Classes */
+.bg-ivory {
+  background-color: #FAFAF8;
+}
+
+.text-charcoal {
+  color: #0A0D12;
+}
+
+.text-emerald-brand {
+  color: #047857;
+}
+
+.bg-emerald-brand {
+  background-color: #064E3B;
+}
+
+.bg-emerald-brand:hover {
+  background-color: #065F46;
+}
+
+/* Pill Badges */
+.ref-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  color: #374151;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+.ref-pill-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background-color: #10B981;
+}
+
+/* Floating UI Badges */
+.floating-ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.95rem;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(229, 231, 235, 0.85);
+  border-radius: 9999px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #1F2937;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.floating-ui-badge:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -5px rgba(6, 78, 59, 0.08);
+}
+
+/* Card Hover Elevation */
+.ref-card {
+  background: #FFFFFF;
+  border: 1px solid #EAEBE8;
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ref-card:hover {
+  border-color: #D8DAD4;
+  box-shadow: 0 8px 24px -4px rgba(6, 78, 59, 0.06), 0 4px 8px -2px rgba(0, 0, 0, 0.02);
+  transform: translateY(-2px);
+}
+
+/* Primary Emerald Button */
+.btn-emerald-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.35rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #064E3B 0%, #065F46 100%);
+  box-shadow: 0 4px 14px -2px rgba(6, 78, 59, 0.25);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-emerald-primary:hover {
+  background: linear-gradient(135deg, #065F46 0%, #047857 100%);
+  box-shadow: 0 6px 20px -2px rgba(6, 78, 59, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-emerald-primary:active {
+  transform: scale(0.98);
+}
+
+/* Secondary Ivory/White Button */
+.btn-emerald-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.35rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #1F2937;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-emerald-secondary:hover {
+  background: #F9FAFB;
+  border-color: #D1D5DB;
+  color: #064E3B;
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+
+.btn-emerald-secondary:active {
+  transform: scale(0.98);
+}
+
+/* Equalizer Bars Animation */
+@keyframes eqBar {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+
+.animate-eq-1 { animation: eqBar 0.8s ease-in-out infinite; }
+.animate-eq-2 { animation: eqBar 0.6s ease-in-out infinite 0.15s; }
+.animate-eq-3 { animation: eqBar 1.0s ease-in-out infinite 0.3s; }
+.animate-eq-4 { animation: eqBar 0.7s ease-in-out infinite 0.2s; }
+
+/* Subtle Ambient Float Animation */
+@keyframes gentleFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-float-slow {
+  animation: gentleFloat 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: gentleFloat 7s ease-in-out infinite 2s;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FAFAF8;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D5D8D0;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #A3A89E;
 }
