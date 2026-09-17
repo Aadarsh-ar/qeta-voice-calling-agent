@@ -235,6 +235,7 @@ export async function POST(
       const updatedAgent = dataStore.updateAgent(id, {
         name: liveName,
         description: liveDesc,
+        instructions: liveInstructions,
         systemPrompt: liveInstructions,
         initialMessage: liveGreeting,
         cartesiaVoiceId: liveVoiceId,
@@ -252,6 +253,11 @@ export async function POST(
         action: "pull",
         message: `Successfully pulled configuration from Cartesia agent (${cartesiaAgentId})!`,
         agent: updatedAgent,
+        qetaAgent: updatedAgent,
+        instructions: liveInstructions,
+        initialMessage: liveGreeting,
+        voiceId: liveVoiceId,
+        language: liveLang,
         versionId,
       });
     } else {

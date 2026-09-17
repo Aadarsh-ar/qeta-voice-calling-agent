@@ -1,123 +1,178 @@
 import { NextResponse } from "next/server";
 import { dataStore, AgentItem } from "@/lib/db/store";
 import { prisma } from "@/lib/db/prisma";
-import { syncAgentWithCartesia } from "@/lib/cartesia/sync";
+import { syncAgentWithCartesia, getCartesiaAgentDetails } from "@/lib/cartesia/sync";
 import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  let agent = dataStore.getAgent(id);
+  const url = new URL(req.url);
+  const skipCartesia = url.searchParams.get("skipCartesia") === "true";
 
-  if (!agent) {
-    try {
-      const dbAgent = await prisma.agent.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          organizationId: true,
-          name: true,
-          description: true,
-          instructions: true,
-          systemPrompt: true,
-          businessContext: true,
-          cartesiaVoiceId: true,
-          cartesiaAgentId: true,
-          cartesiaModel: true,
-          llmModel: true,
-          language: true,
-          status: true,
-          initialMessage: true,
-          cartesiaVersionId: true,
-          lastSyncedAt: true,
-          lastSyncStatus: true,
-          lastSyncError: true,
-          createdAt: true,
-          updatedAt: true,
-          phoneNumber: { select: { e164Number: true } },
-          business: {
-            select: {
-              name: true,
-              description: true,
-              information: true,
-              operatingHours: true,
-              address: true,
-              contactInformation: true,
-              website: true,
-            },
-          },
-          tools: {
-            select: { name: true, description: true, isEnabled: true, enabled: true },
+  let dbAgent: any = null;
+  try {
+    dbAgent = await prisma.agent.findFirst({
+      where: {
+        OR: [
+          { id },
+          { cartesiaAgentId: id },
+        ],
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+        description: true,
+        instructions: true,
+        systemPrompt: true,
+        businessContext: true,
+        cartesiaVoiceId: true,
+        cartesiaAgentId: true,
+        cartesiaModel: true,
+        llmModel: true,
+        language: true,
+        status: true,
+        initialMessage: true,
+        cartesiaVersionId: true,
+        lastSyncedAt: true,
+        lastSyncStatus: true,
+        lastSyncError: true,
+        createdAt: true,
+        updatedAt: true,
+        phoneNumber: { select: { e164Number: true } },
+        business: {
+          select: {
+            name: true,
+            description: true,
+            information: true,
+            operatingHours: true,
+            address: true,
+            contactInformation: true,
+            website: true,
           },
         },
-      });
+        tools: {
+          select: { name: true, description: true, isEnabled: true, enabled: true },
+        },
+      },
+    });
+  } catch (err) {
+    console.warn("DB agent retrieval exception in GET /api/agents/[id]:", err);
+  }
 
-      if (dbAgent) {
-        let parsedBizProfile: any = undefined;
-        if (dbAgent.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
-          try {
-            parsedBizProfile = JSON.parse(dbAgent.businessContext);
-          } catch {}
-        }
+  const existingStoreAgent = dataStore.getAgent(id);
+  const targetCartesiaAgentId =
+    dbAgent?.cartesiaAgentId ||
+    (id.startsWith("agent_") ? id : undefined) ||
+    existingStoreAgent?.cartesiaAgentId;
 
-        if (!parsedBizProfile && dbAgent.business) {
-          parsedBizProfile = {
-            businessName: dbAgent.business.name,
-            description: dbAgent.business.description || "",
-            productsServices: dbAgent.business.information || "",
-            workingHours: dbAgent.business.operatingHours || "",
-            location: dbAgent.business.address || "",
-            contactInfo: dbAgent.business.contactInformation || "",
-            website: dbAgent.business.website || "",
-          };
-        }
-
-        agent = {
-          id: dbAgent.id,
-          name: dbAgent.name,
-          description: dbAgent.description || "",
-          language: dbAgent.language as any,
-          status: dbAgent.status as any,
-          systemPrompt: dbAgent.instructions || dbAgent.systemPrompt,
-          initialMessage: dbAgent.initialMessage || undefined,
-          cartesiaVersionId: dbAgent.cartesiaVersionId || undefined,
-          lastSyncedAt: dbAgent.lastSyncedAt?.toISOString(),
-          lastSyncStatus: (dbAgent.lastSyncStatus as any) || "SYNCED",
-          businessContext: dbAgent.businessContext || "",
-          businessProfile: parsedBizProfile,
-          cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-          cartesiaVoiceName: "AD (Cloned Telugu Voice)",
-          cartesiaModel: dbAgent.cartesiaModel,
-          llmModel: dbAgent.llmModel,
-          sarvamModel: "saaras:v3-realtime",
-          sarvamLanguage: "te-IN",
-          phoneNumber: dbAgent.phoneNumber?.e164Number || "+91 80 7158 2667",
-          callsCount: 0,
-          totalMinutes: 0,
-          estimatedCost: 0,
-          lastActive: "Active",
-          createdAt: dbAgent.createdAt.toISOString(),
-          tools: dbAgent.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            isEnabled: t.enabled && t.isEnabled,
-          })),
-          cartesiaAgentId: dbAgent.cartesiaAgentId || (dbAgent.id.startsWith("agent_") ? dbAgent.id : undefined),
-        };
-
-        dataStore.createAgentWithId(agent);
-      }
-    } catch (err) {
-      console.warn("DB agent retrieval exception:", err);
+  // Always attempt to fetch live ground truth from Cartesia if agent is linked
+  let liveCartesiaData: any = null;
+  if (!skipCartesia && targetCartesiaAgentId && process.env.CARTESIA_API_KEY) {
+    try {
+      liveCartesiaData = await getCartesiaAgentDetails(targetCartesiaAgentId);
+    } catch (cartesiaErr) {
+      console.warn(`[CARTESIA_GET_WARN] Could not fetch live Cartesia agent ${targetCartesiaAgentId}:`, cartesiaErr);
     }
   }
 
-  if (!agent) {
-    return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
+  // Determine authoritative fields: Cartesia live data > DB data > in-memory store
+  const liveInstructions =
+    liveCartesiaData?.llm_system_prompt !== undefined
+      ? liveCartesiaData.llm_system_prompt
+      : (dbAgent?.instructions || dbAgent?.systemPrompt || existingStoreAgent?.systemPrompt || "");
+
+  const liveGreeting =
+    liveCartesiaData?.llm_introduce !== undefined && liveCartesiaData.llm_introduce !== null
+      ? liveCartesiaData.llm_introduce
+      : (dbAgent?.initialMessage || existingStoreAgent?.initialMessage || "");
+
+  const liveVoiceId =
+    liveCartesiaData?.tts_voice ||
+    dbAgent?.cartesiaVoiceId ||
+    existingStoreAgent?.cartesiaVoiceId ||
+    process.env.CARTESIA_VOICE_ID ||
+    "41508a7d-4839-445f-ba7f-687f620ed0e7";
+
+  const liveLanguage =
+    liveCartesiaData?.tts_language === "en"
+      ? "ENGLISH"
+      : (dbAgent?.language || existingStoreAgent?.language || "TELUGU_ENGLISH");
+
+  let parsedBizProfile: any = undefined;
+  if (dbAgent?.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
+    try {
+      parsedBizProfile = JSON.parse(dbAgent.businessContext);
+    } catch {}
   }
-  return NextResponse.json({ success: true, agent });
+
+  if (!parsedBizProfile && dbAgent?.business) {
+    parsedBizProfile = {
+      businessName: dbAgent.business.name,
+      description: dbAgent.business.description || "",
+      productsServices: dbAgent.business.information || "",
+      workingHours: dbAgent.business.operatingHours || "",
+      location: dbAgent.business.address || "",
+      contactInfo: dbAgent.business.contactInformation || "",
+      website: dbAgent.business.website || "",
+    };
+  }
+
+  const agentIdResolved = dbAgent?.id || id;
+  const agentItem: AgentItem = {
+    id: agentIdResolved,
+    name: dbAgent?.name || existingStoreAgent?.name || "AD2 — Aadarsh",
+    description: dbAgent?.description || existingStoreAgent?.description || "",
+    language: liveLanguage as any,
+    status: (dbAgent?.status || existingStoreAgent?.status || "ACTIVE") as any,
+    systemPrompt: liveInstructions,
+    instructions: liveInstructions,
+    initialMessage: liveGreeting,
+    cartesiaVersionId: liveCartesiaData?.pinned_version || liveCartesiaData?.version?.id || dbAgent?.cartesiaVersionId || "active",
+    lastSyncedAt: liveCartesiaData?.updated_at || dbAgent?.lastSyncedAt?.toISOString() || new Date().toISOString(),
+    lastSyncStatus: liveCartesiaData ? "SYNCED" : (dbAgent?.lastSyncStatus as any || "SYNCED"),
+    businessContext: dbAgent?.businessContext || existingStoreAgent?.businessContext || "",
+    businessProfile: parsedBizProfile || existingStoreAgent?.businessProfile,
+    cartesiaVoiceId: liveVoiceId,
+    cartesiaVoiceName: existingStoreAgent?.cartesiaVoiceName || "Harika (Telugu Faculty Voice)",
+    cartesiaModel: dbAgent?.cartesiaModel || "sonic-3.6",
+    llmModel: dbAgent?.llmModel || "gemini-2.5-flash",
+    sarvamModel: "saaras:v3-realtime",
+    sarvamLanguage: "te-IN",
+    phoneNumber: dbAgent?.phoneNumber?.e164Number || existingStoreAgent?.phoneNumber || "+91 80 7158 2667",
+    callsCount: existingStoreAgent?.callsCount || 0,
+    totalMinutes: existingStoreAgent?.totalMinutes || 0,
+    estimatedCost: existingStoreAgent?.estimatedCost || 0,
+    lastActive: "Active & Synchronized",
+    createdAt: dbAgent?.createdAt?.toISOString() || existingStoreAgent?.createdAt || new Date().toISOString(),
+    tools: dbAgent?.tools
+      ? dbAgent.tools.map((t: any) => ({ name: t.name, description: t.description, isEnabled: t.enabled && t.isEnabled }))
+      : existingStoreAgent?.tools || [],
+    cartesiaAgentId: targetCartesiaAgentId,
+  };
+
+  dataStore.createAgentWithId(agentItem);
+
+  // If live data from Cartesia was fetched, keep PostgreSQL in sync
+  if (liveCartesiaData && dbAgent?.id) {
+    prisma.agent.update({
+      where: { id: dbAgent.id },
+      data: {
+        instructions: liveInstructions,
+        systemPrompt: liveInstructions,
+        initialMessage: liveGreeting,
+        cartesiaVoiceId: liveVoiceId,
+        lastSyncedAt: new Date(),
+        lastSyncStatus: "SYNCED",
+        lastSyncError: null,
+      },
+    }).catch((uErr) => console.warn("Background DB sync warning:", uErr));
+  }
+
+  return NextResponse.json({ success: true, agent: agentItem });
 }
 
 export async function PUT(
@@ -317,6 +372,7 @@ export async function PUT(
     const updated = dataStore.updateAgent(id, {
       ...body,
       name: agentName,
+      instructions: syncResult.instructions,
       systemPrompt: syncResult.instructions,
       initialMessage: syncResult.initialMessage,
       cartesiaAgentId: verifiedCartesiaAgentId,
@@ -332,7 +388,7 @@ export async function PUT(
       id,
       organizationId: (currentAgent as any)?.organizationId || "org_default",
       name: agentName,
-      instructions: agentInstructions,
+      instructions: syncResult.instructions,
       businessName: bizProfile.businessName || "QETADOTIN",
       cartesiaAgentId: verifiedCartesiaAgentId,
       cartesiaVoiceId: voiceId,
@@ -357,6 +413,8 @@ export async function PUT(
       cartesiaAgentId: verifiedCartesiaAgentId,
       cartesiaVersionId: syncResult.cartesiaVersionId,
       updatedAt: syncResult.updatedAt,
+      instructions: syncResult.instructions,
+      initialMessage: syncResult.initialMessage,
     });
   } catch (err: unknown) {
     return NextResponse.json(

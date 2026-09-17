@@ -167,17 +167,17 @@ export default function AgentDetailPage({
       });
       const d = await res.json();
       if (res.ok && d.success) {
-        showToast(
-          direction === "pull"
-            ? "Successfully pulled latest configuration from Cartesia!"
-            : "Successfully pushed configuration to Cartesia!"
-        );
-        if (direction === "pull" && d.qetaAgent) {
-          setName(d.qetaAgent.name);
-          setSystemPrompt(d.qetaAgent.instructions);
-          setInitialMessage(d.qetaAgent.initialMessage || "");
-          setCartesiaVoiceId(d.qetaAgent.cartesiaVoiceId);
-          setLanguage(d.qetaAgent.language);
+        if (direction === "pull") {
+          const qAgent = d.qetaAgent || d.agent;
+          if (qAgent) {
+            if (qAgent.name) setName(qAgent.name);
+            const liveInst = qAgent.instructions || qAgent.systemPrompt || d.instructions;
+            if (liveInst) setSystemPrompt(liveInst);
+            const liveGreet = qAgent.initialMessage !== undefined ? qAgent.initialMessage : d.initialMessage;
+            if (liveGreet !== undefined) setInitialMessage(liveGreet || "");
+            if (qAgent.cartesiaVoiceId || d.voiceId) setCartesiaVoiceId(qAgent.cartesiaVoiceId || d.voiceId);
+            if (qAgent.language || d.language) setLanguage(qAgent.language || d.language);
+          }
         }
         await handleCheckDrift();
       } else {
@@ -318,6 +318,7 @@ export default function AgentDetailPage({
           name,
           description,
           systemPrompt,
+          instructions: systemPrompt,
           initialMessage,
           businessContext,
           language,
@@ -331,11 +332,17 @@ export default function AgentDetailPage({
 
       const data = await res.json();
       if (res.ok && data.success && data.synced) {
+        const confirmedInst = data.instructions || data.agent?.systemPrompt || systemPrompt;
+        const confirmedGreet = data.initialMessage !== undefined ? data.initialMessage : (data.agent?.initialMessage !== undefined ? data.agent?.initialMessage : initialMessage);
+        setSystemPrompt(confirmedInst);
+        setInitialMessage(confirmedGreet);
+
         dataStore.updateAgent(agent.id, {
           name,
           description,
-          systemPrompt,
-          initialMessage,
+          instructions: confirmedInst,
+          systemPrompt: confirmedInst,
+          initialMessage: confirmedGreet,
           businessContext,
           language,
           cartesiaVoiceId,
@@ -369,7 +376,7 @@ export default function AgentDetailPage({
           lastSyncedAt: new Date().toLocaleTimeString(),
         });
         setSaveStep("ready");
-        showToast("Changes saved successfully!");
+        showToast("Instructions and agent configuration saved & synced to Cartesia!");
         setTimeout(() => setSaveStep("idle"), 3500);
       } else {
         const errorMsg = data.error || "Failed to update configuration.";
@@ -861,15 +868,35 @@ export default function AgentDetailPage({
           {/* Instructions & Training Tab */}
           {activeTab === "instructions" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">Agent Persona & Core Instructions</h4>
-                  <p className="text-xs text-slate-500">
-                    Define agent identity, tone, guidelines, and specific telephone behavior.
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-slate-900">Agent Persona & Core Instructions</h4>
+                    {cartesiaAgentId && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Cartesia: {cartesiaAgentId}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Live instructions executed on Cartesia during phone calls. Saving updates Cartesia in real time.
                   </p>
                 </div>
 
-                {renderSaveButton("Save Instructions & Training")}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSyncDirection("pull")}
+                    disabled={isSyncingDrift === "pull"}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition disabled:opacity-50"
+                    title="Fetch and match live instructions from Cartesia"
+                  >
+                    <ArrowDownToLine className={`w-3.5 h-3.5 text-indigo-600 ${isSyncingDrift === "pull" ? "animate-bounce" : ""}`} />
+                    {isSyncingDrift === "pull" ? "Fetching..." : "Fetch from Cartesia"}
+                  </button>
+                  {renderSaveButton("Save & Sync to Cartesia")}
+                </div>
               </div>
 
               {/* System Prompt Input */}

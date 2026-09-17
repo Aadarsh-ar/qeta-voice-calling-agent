@@ -9,7 +9,8 @@
  * 5. Strict multi-tenant safety: never uses default, hardcoded, or random agents.
  */
 
-import { compileAgentInstructions, compileAgentGreeting, CompilePromptParams } from "@/lib/agent/promptCompiler";
+import { compileAgentInstructions, compileAgentGreeting } from "../agent/promptCompiler";
+import type { CompilePromptParams } from "../agent/promptCompiler";
 
 export interface SyncAgentParams extends CompilePromptParams {
   cartesiaAgentId?: string;
@@ -99,7 +100,7 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
       "Cartesia-Version": CARTESIA_API_VERSION,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(hasExistingAgent ? payload : { name: slugName }),
   });
 
   if (!response.ok) {
@@ -117,20 +118,58 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
   const result = await response.json();
   const resultingAgentId = result.id || targetAgentId;
 
+  // If newly created, immediately apply full instructions & config via PATCH
+  if (!hasExistingAgent && resultingAgentId) {
+    console.log(`[CARTESIA_SYNC_CONFIG] Applying instructions to newly created agent ${resultingAgentId}...`);
+    const patchRes = await fetch(`${CARTESIA_API_BASE}/agents/${resultingAgentId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-API-Key": apiKey,
+        "Cartesia-Version": CARTESIA_API_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!patchRes.ok) {
+      const patchErr = await patchRes.text();
+      console.warn(`[CARTESIA_SYNC_WARN] Patching new agent instructions warning (${patchRes.status}):`, patchErr);
+    }
+  }
+
   // 3. Verify synchronization: Fetch back from Cartesia to confirm active deployment
-  let verifiedVersionId = result.version?.id || "active";
+  let verifiedVersionId = result.pinned_version || result.version?.id || "active";
+  let liveInstructions = finalInstructions;
+  let liveGreeting = finalGreeting;
+  let liveVoiceId = voiceId;
+  let liveLanguage = languageCode;
+
   try {
     const verifyRes = await fetch(`${CARTESIA_API_BASE}/agents/${resultingAgentId}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
+        "X-API-Key": apiKey,
         "Cartesia-Version": CARTESIA_API_VERSION,
       },
     });
     if (verifyRes.ok) {
       const verifyData = await verifyRes.json();
-      verifiedVersionId = verifyData.version?.id || verifiedVersionId;
-      console.log(`[CARTESIA_SYNC_VERIFIED] Agent ${resultingAgentId} confirmed active at version ${verifiedVersionId} in ${Date.now() - t0}ms`);
+      verifiedVersionId = verifyData.pinned_version || verifyData.version?.id || verifiedVersionId;
+      if (verifyData.llm_system_prompt !== undefined) {
+        liveInstructions = verifyData.llm_system_prompt;
+      }
+      if (verifyData.llm_introduce !== undefined && verifyData.llm_introduce !== null) {
+        liveGreeting = verifyData.llm_introduce;
+      }
+      if (verifyData.tts_voice) {
+        liveVoiceId = verifyData.tts_voice;
+      }
+      if (verifyData.tts_language) {
+        liveLanguage = verifyData.tts_language;
+      }
+      console.log(`[CARTESIA_SYNC_VERIFIED] Agent ${resultingAgentId} confirmed active in ${Date.now() - t0}ms (Instructions length: ${liveInstructions.length})`);
     }
   } catch (verifyErr) {
     console.warn(`[CARTESIA_VERIFY_WARN] Verification check timed out, proceeding with primary result:`, verifyErr);
@@ -141,10 +180,10 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     cartesiaAgentId: resultingAgentId,
     cartesiaVersionId: verifiedVersionId,
     updatedAt: result.updated_at || new Date().toISOString(),
-    instructions: finalInstructions,
-    initialMessage: finalGreeting,
-    voiceId,
-    language: languageCode,
+    instructions: liveInstructions,
+    initialMessage: liveGreeting,
+    voiceId: liveVoiceId,
+    language: liveLanguage,
   };
 }
 
@@ -158,6 +197,7 @@ export async function getCartesiaAgentDetails(agentId: string) {
   const res = await fetch(`${CARTESIA_API_BASE}/agents/${agentId}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
+      "X-API-Key": apiKey,
       "Cartesia-Version": CARTESIA_API_VERSION,
     },
   });
