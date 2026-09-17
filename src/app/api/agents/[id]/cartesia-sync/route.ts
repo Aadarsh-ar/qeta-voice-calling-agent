@@ -62,18 +62,23 @@ export async function GET(
     // Compare fields
     const differences: { field: string; label: string; qetaValue: string; cartesiaValue: string }[] = [];
 
-    const cartesiaName = (cartesiaData.name || "").trim();
-    const qetaName = (dbAgent.name || "").trim();
-    if (cartesiaName && qetaName && cartesiaName !== qetaName) {
+    const cartesiaName = (cartesiaData.name || "").trim().toLowerCase();
+    const qetaNameSlug = (dbAgent.name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_\-.]/g, "-")
+      .replace(/--+/g, "-")
+      .replace(/^-|-$/g, "");
+    if (cartesiaName && qetaNameSlug && cartesiaName !== qetaNameSlug && !qetaNameSlug.includes(cartesiaName) && !cartesiaName.includes(qetaNameSlug)) {
       differences.push({
         field: "name",
         label: "Agent Name",
-        qetaValue: qetaName,
-        cartesiaValue: cartesiaName,
+        qetaValue: dbAgent.name,
+        cartesiaValue: cartesiaData.name,
       });
     }
 
-    const cartesiaGreeting = (cartesiaData.config?.initial_message || "").trim();
+    const cartesiaGreeting = (cartesiaData.llm_introduce || cartesiaData.config?.initial_message || "").trim();
     const qetaGreeting = (dbAgent.initialMessage || "").trim();
     if (cartesiaGreeting && qetaGreeting && cartesiaGreeting !== qetaGreeting) {
       differences.push({
@@ -84,7 +89,7 @@ export async function GET(
       });
     }
 
-    const cartesiaVoiceId = (cartesiaData.config?.audio?.output?.voice_id || "").trim();
+    const cartesiaVoiceId = (cartesiaData.tts_voice || cartesiaData.config?.audio?.output?.voice_id || "").trim();
     const qetaVoiceId = (dbAgent.cartesiaVoiceId || "").trim();
     if (cartesiaVoiceId && qetaVoiceId && cartesiaVoiceId !== qetaVoiceId) {
       differences.push({
@@ -95,7 +100,7 @@ export async function GET(
       });
     }
 
-    const cartesiaLang = (cartesiaData.config?.language?.primary || "").trim();
+    const cartesiaLang = (cartesiaData.tts_language || cartesiaData.config?.language?.primary || "").trim();
     const qetaLang = dbAgent.language === "ENGLISH" ? "en" : "te";
     if (cartesiaLang && qetaLang && cartesiaLang !== qetaLang) {
       differences.push({
@@ -106,13 +111,14 @@ export async function GET(
       });
     }
 
-    const cartesiaInstructions = (cartesiaData.config?.instructions || "").trim();
+    const cartesiaInstructions = (cartesiaData.llm_system_prompt || cartesiaData.config?.instructions || "").trim();
     const qetaInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
     const normCartesia = cartesiaInstructions.replace(/\r\n/g, "\n");
     const normQeta = qetaInstructions.replace(/\r\n/g, "\n");
     const isInstructionsMatch =
       normCartesia === normQeta ||
-      (normQeta.length > 20 && normCartesia.includes(normQeta));
+      (normQeta.length > 20 && normCartesia.includes(normQeta)) ||
+      (normCartesia.length > 20 && normQeta.includes(normCartesia));
 
     if (cartesiaInstructions && qetaInstructions && !isInstructionsMatch) {
       differences.push({
@@ -200,10 +206,10 @@ export async function POST(
     if (action === "pull") {
       // ── PULL: Read from Cartesia and overwrite QETADOTIN with ground truth ──
       const liveData = await getCartesiaAgentDetails(cartesiaAgentId);
-      const liveInstructions = liveData.config?.instructions || dbAgent.instructions;
-      const liveGreeting = liveData.config?.initial_message || dbAgent.initialMessage;
-      const liveVoiceId = liveData.config?.audio?.output?.voice_id || dbAgent.cartesiaVoiceId;
-      const liveLang = liveData.config?.language?.primary === "en" ? "ENGLISH" : "TELUGU";
+      const liveInstructions = liveData.llm_system_prompt || liveData.config?.instructions || dbAgent.instructions;
+      const liveGreeting = liveData.llm_introduce || liveData.config?.initial_message || dbAgent.initialMessage;
+      const liveVoiceId = liveData.tts_voice || liveData.config?.audio?.output?.voice_id || dbAgent.cartesiaVoiceId;
+      const liveLang = (liveData.tts_language || liveData.config?.language?.primary) === "en" ? "ENGLISH" : "TELUGU";
       const liveName = liveData.name || dbAgent.name;
       const liveDesc = liveData.description || dbAgent.description;
       const versionId = liveData.version?.id || dbAgent.cartesiaVersionId;

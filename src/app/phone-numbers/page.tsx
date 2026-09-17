@@ -24,7 +24,7 @@ export default function PhoneNumbersPage() {
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
   const [numberToAssign, setNumberToAssign] = useState<PhoneNumberItem | null>(null);
   const [newNumberInput, setNewNumberInput] = useState("+91 80 7158 2667");
-  const [selectedAgentId, setSelectedAgentId] = useState("agent_telugu_sales");
+  const [selectedAgentId, setSelectedAgentId] = useState("agent_vDCfnuFdJokXJDVxgmHeZx");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Sync phone numbers and agents from API on mount

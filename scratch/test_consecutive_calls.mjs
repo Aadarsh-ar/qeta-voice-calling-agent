@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 
-const agentId = "agent_minb6qwKNfwWXLV8gyRfRq";
+const agentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
 const wsBaseUrl = "ws://localhost:3000/api/vobiz/stream";
 
 async function runSingleCall(callIndex) {

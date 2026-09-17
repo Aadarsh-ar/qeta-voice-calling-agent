@@ -20,15 +20,10 @@ export async function POST(req: Request) {
     }
 
     const KNOWN_AGENTS: Record<string, { voiceId: string; voiceName: string; defaultName: string }> = {
-      "agent_minb6qwKNfwWXLV8gyRfRq": {
-        voiceId: "89907713-42ce-4ddd-8ff5-301211c564c1",
+      "agent_vDCfnuFdJokXJDVxgmHeZx": {
+        voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
         voiceName: "Harika (Telugu Faculty Voice)",
-        defaultName: "College Support",
-      },
-      "agent_GaiYMgB9Bj9kaKW1tUgqSQ": {
-        voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-        voiceName: "AD (Cloned Telugu Voice)",
-        defaultName: "ABC Support",
+        defaultName: "College Attendance Notification",
       },
     };
 
@@ -58,14 +53,8 @@ export async function POST(req: Request) {
             }
             const exactInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
             const known = KNOWN_AGENTS[dbAgent.id] || KNOWN_AGENTS[dbAgent.cartesiaAgentId || ""];
-            const resolvedVoiceId = body.voiceId || body.cartesiaVoiceId || dbAgent.cartesiaVoiceId || known?.voiceId || (
-              dbAgent.name.toLowerCase().includes("college") || dbAgent.name.toLowerCase().includes("attendance")
-                ? "89907713-42ce-4ddd-8ff5-301211c564c1"
-                : "f9945b75-0f3b-448d-ba9e-3d22c229a68e"
-            );
-            const resolvedVoiceName = resolvedVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
-              ? "Harika (Telugu Faculty Voice)"
-              : "AD (Cloned Telugu Voice)";
+            const resolvedVoiceId = body.voiceId || body.cartesiaVoiceId || dbAgent.cartesiaVoiceId || known?.voiceId || "41508a7d-4839-445f-ba7f-687f620ed0e7";
+            const resolvedVoiceName = "Harika (Telugu Faculty Voice)";
 
             agent = {
               id: dbAgent.id,
@@ -113,9 +102,7 @@ export async function POST(req: Request) {
       } else if (known?.voiceId) {
         agent.cartesiaVoiceId = known.voiceId;
       }
-      agent.cartesiaVoiceName = agent.cartesiaVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
-        ? "Harika (Telugu Faculty Voice)"
-        : "AD (Cloned Telugu Voice)";
+      agent.cartesiaVoiceName = "Harika (Telugu Faculty Voice)";
     } else if (cleanId && KNOWN_AGENTS[cleanId]) {
       const known = KNOWN_AGENTS[cleanId];
       agent = {
@@ -134,13 +121,11 @@ export async function POST(req: Request) {
       body.voiceId ||
       body.cartesiaVoiceId ||
       agent?.cartesiaVoiceId ||
-      (cleanId === "agent_minb6qwKNfwWXLV8gyRfRq" ? "89907713-42ce-4ddd-8ff5-301211c564c1" : "f9945b75-0f3b-448d-ba9e-3d22c229a68e");
+      "41508a7d-4839-445f-ba7f-687f620ed0e7";
 
     if (agent) {
       agent.cartesiaVoiceId = effectiveVoiceId;
-      agent.cartesiaVoiceName = effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
-        ? "Harika (Telugu Faculty Voice)"
-        : "AD (Cloned Telugu Voice)";
+      agent.cartesiaVoiceName = "Harika (Telugu Faculty Voice)";
     }
 
     // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, etc.)

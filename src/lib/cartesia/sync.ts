@@ -32,7 +32,7 @@ export interface SyncAgentResult {
 }
 
 const CARTESIA_API_VERSION = "2026-08-14";
-const CARTESIA_API_BASE = "https://api.cartesia.ai/v1";
+const CARTESIA_API_BASE = "https://api.cartesia.ai";
 
 /**
  * Synchronizes an agent's configuration to Cartesia's official Agent API.
@@ -63,49 +63,22 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
       language: params.language,
     });
 
-  const voiceId = params.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
+  const voiceId = params.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7";
   const languageCode = params.language === "ENGLISH" ? "en" : "te";
-  const transferNumber = params.transferPhoneNumber || "+916305367443";
+
+  const slugName = params.agentName
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-.]/g, "-")
+    .replace(/--+/g, "-")
+    .replace(/^-|-$/g, "") || "voice-agent";
 
   // 2. Prepare payload conforming strictly to Cartesia Agent API schema
   const payload: Record<string, unknown> = {
-    name: params.agentName.trim(),
-    description: params.description || params.businessDescription || "QETADOTIN Voice Agent",
-    config: {
-      instructions: finalInstructions,
-      initial_message: finalGreeting,
-      model: {
-        id: "gemini-2.5-flash",
-        temperature: 0.2, // Extreme low latency, highly deterministic
-        max_output_tokens: 50, // Crisp 1-2 sentence spoken turns (< 20 words) for minimal TTFB
-      },
-      language: {
-        primary: languageCode,
-      },
-      audio: {
-        input: {
-          noise_suppression: "auto",
-        },
-        output: {
-          voice_id: voiceId,
-        },
-      },
-      system_tools: {
-        end_call: { pre_tool_speech: "auto" },
-        transfer_to_number: {
-          pre_tool_speech: "auto",
-          transfers: [
-            {
-              destination: {
-                type: "phone",
-                phone_number: transferNumber,
-              },
-              condition: "caller explicitly requests human manager, agent, or representative",
-            },
-          ],
-        },
-      },
-    },
+    name: slugName,
+    llm_system_prompt: finalInstructions,
+    llm_introduce: finalGreeting,
+    tts_voice: voiceId,
+    tts_language: languageCode,
   };
 
   const hasExistingAgent = Boolean(params.cartesiaAgentId && params.cartesiaAgentId.trim().startsWith("agent_"));

@@ -78,16 +78,28 @@ async function runSuite() {
 
   for (const page of pages) {
     try {
-      const res = await fetchUrl(`http://localhost:3000${page.path}`);
+      const res = await fetchUrl(`http://localhost:3000${page.path}`, {
+        headers: {
+          Cookie: "qeta_session=qeta_admin_authenticated_v1",
+        },
+      });
       assert(res.status === 200, `Page: ${page.name} (${page.path})`, `status: ${res.status}`);
     } catch (err) {
       assert(false, `Page: ${page.name} (${page.path})`, err.message);
     }
   }
 
+  // Verify server-side auth protection (307 redirect when unauthenticated)
+  try {
+    const unauthRes = await fetchUrl("http://localhost:3000/agents");
+    assert(unauthRes.status === 307, "Unauthenticated access protected by server-side redirect (status: 307)");
+  } catch (err) {
+    assert(false, "Unauthenticated protection check", err.message);
+  }
+
   // --- 2. REST API Endpoints ---
   console.log('\n--- 2. Testing Core REST APIs ---');
-  let discoveredAgentId = 'agent_GaiYMgB9Bj9kaKW1tUgqSQ';
+  let discoveredAgentId = 'agent_vDCfnuFdJokXJDVxgmHeZx';
   try {
     const agentsRes = await fetchUrl('http://localhost:3000/api/agents');
     assert(agentsRes.status === 200, 'GET /api/agents', `returned status 200`);

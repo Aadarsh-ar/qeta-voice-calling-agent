@@ -26,35 +26,19 @@ interface AgentOption {
 
 const AGENTS: AgentOption[] = [
   {
-    id: "agent_minb6qwKNfwWXLV8gyRfRq",
-    name: "College Support",
-    role: "Admissions & Attendance Helpline",
+    id: "agent_vDCfnuFdJokXJDVxgmHeZx",
+    name: "College Attendance Notification",
+    role: "Faculty Attendance Helpline",
     emoji: "🎓",
     voiceName: "Harika Voice",
     voiceGender: "Female (Telugu)",
-    voiceId: "89907713-42ce-4ddd-8ff5-301211c564c1",
-    greeting: "“హలో అండి, నేను Naresh గారి పేరెంట్స్‌తో మాట్లాడుతున్నానా?”",
-    description: "Assists parents and students with attendance counseling (75% rule), exam fees, and semester academic policies in polite natural Telugu.",
+    voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+    greeting: "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.",
+    description: "Assists parents with attendance counseling (75% rule), exam eligibility, and student academic welfare in polite natural Telugu.",
     sampleQuestions: [
       "కాలేజ్ attendance requirement ఎంత?",
       "నా కొడుకు attendance 75% కన్నా తక్కువ ఉంటే ఏమవుతుంది?",
       "ఎగ్జామ్ ఫీజు ఎప్పుడు కట్టాలి?",
-    ],
-  },
-  {
-    id: "agent_GaiYMgB9Bj9kaKW1tUgqSQ",
-    name: "ABC Support",
-    role: "Electronics Retail & Service Support",
-    emoji: "🛒",
-    voiceName: "AD Voice",
-    voiceGender: "Male (Tenglish)",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-    greeting: "హలో అండి! నేను Aadarsh మాట్లాడుతున్నాను, ABC Electronics నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?",
-    description: "Handles customer inquiries regarding consumer appliances, refrigerators, warranties, repair bookings, and store locations in natural Telugu & Tenglish.",
-    sampleQuestions: [
-      "Do you sell refrigerators?",
-      "మీ షోరూమ్ ఎక్కడ ఉంది?",
-      "How to claim warranty for TV?",
     ],
   },
 ];

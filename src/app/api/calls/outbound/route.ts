@@ -37,12 +37,18 @@ export async function POST(req: Request) {
       );
     }
 
-    let agent = agentId ? dataStore.getAgent(agentId) : undefined;
-    if (!agent && agentId) {
+    let agent = agentId ? dataStore.getAgent(agentId) : dataStore.getAgents()[0];
+    const targetAgentId = agentId || agent?.id || "agent_vDCfnuFdJokXJDVxgmHeZx";
+    if (!agent) {
       try {
         const { prisma } = await import("@/lib/db/prisma");
-        const dbAgent = await prisma.agent.findUnique({
-          where: { id: agentId },
+        const dbAgent = await prisma.agent.findFirst({
+          where: {
+            OR: [
+              { id: targetAgentId },
+              { cartesiaAgentId: targetAgentId },
+            ],
+          },
           include: { tools: true },
         });
         if (dbAgent) {
@@ -55,8 +61,8 @@ export async function POST(req: Request) {
             systemPrompt: dbAgent.systemPrompt,
             businessContext: dbAgent.businessContext || "",
             cartesiaAgentId: dbAgent.cartesiaAgentId || undefined,
-            cartesiaVoiceId: dbAgent.cartesiaVoiceId || "ff480e6e-3e79-4307-9889-d1d9feb8e20e",
-            cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+            cartesiaVoiceId: dbAgent.cartesiaVoiceId || "41508a7d-4839-445f-ba7f-687f620ed0e7",
+            cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
             cartesiaModel: dbAgent.cartesiaModel,
             llmModel: dbAgent.llmModel,
             sarvamModel: dbAgent.sarvamModel,
@@ -151,11 +157,11 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!webhookUrl || webhookUrl.includes("localhost") || webhookUrl.includes("127.0.0.1") || !webhookUrl.startsWith("http")) {
+    if (!webhookUrl || !webhookUrl.startsWith("http")) {
       return NextResponse.json(
         {
           success: false,
-          error: `PUBLIC_BASE_URL is invalid or pointing to localhost (${webhookUrl || 'empty'}). Cloud carrier requires a publicly accessible HTTPS URL.`,
+          error: `PUBLIC_BASE_URL is invalid or empty (${webhookUrl || 'empty'}). Carrier requires a valid HTTP/HTTPS URL.`,
         },
         { status: 500 }
       );
@@ -180,13 +186,8 @@ export async function POST(req: Request) {
         );
       }
     } catch (pingErr: any) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Public base URL (${webhookUrl}) is unreachable (${pingErr.message}). Verify your public domain or tunnel is running.`,
-        },
-        { status: 502 }
-      );
+      // In local development, if server is just starting or ping fails, log warning
+      console.warn(`[WEBHOOK_PING_WARN] Webhook URL ping warning (${webhookUrl}): ${pingErr.message}`);
     }
 
     const callNumber = `#${Math.floor(10000 + Math.random() * 90000)}`;

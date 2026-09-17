@@ -1025,7 +1025,7 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
             instructions: "",
             systemPrompt: "",
             cartesiaAgentId: targetId,
-            cartesiaVoiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+            cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
             language: "TELUGU",
             business: { name: "Direct" },
             _cachedAt: Date.now(),
@@ -1069,6 +1069,14 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
         }
       } catch {}
     }
+
+    // Default to the single active agent in the system
+    try {
+      const prisma = await getPrismaClient();
+      const defaultAgent = await prisma.agent.findFirst();
+      if (defaultAgent) return defaultAgent;
+    } catch {}
+
     return null;
   }
   // ─────────────────────────────────────────────────────────────────────────────
