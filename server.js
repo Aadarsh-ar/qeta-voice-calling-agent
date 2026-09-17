@@ -1231,8 +1231,21 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
           console.warn(`[AGENT_NOTICE] No custom agent bound to call. Proceeding with active profile.`);
         }
 
-        // ── DELIVER WELCOME GREETING AS PER CARTESIA (0ms pickup) ──
-        if (!greetingSent) {
+        if (cartesiaAgentId) {
+          // ── CARTESIA NATIVE AGENT PATH (Zero-latency direct speech synthesis & trained persona) ──
+          console.log(`[LATENCY_TRACE] CARTESIA_CONNECTING → Connecting to Cartesia Agent WebSocket: ${cartesiaAgentId}`);
+          cartesiaAgentBridge = await handleCartesiaAgentStream(ws, cartesiaAgentId, streamId, callUuid, agentName);
+          if (cartesiaAgentBridge) {
+            useCartesiaNative = true;
+            greetingSent = true;
+            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Cartesia Native Agent active, streaming trained greeting`);
+          } else {
+            console.warn(`[CARTESIA_AGENT] Bridge connection failed — auto-routing to low-latency pipeline`);
+          }
+        }
+
+        // ── FALLBACK PIPELINE: If Cartesia Native bridge is not active ──
+        if (!useCartesiaNative && !greetingSent) {
           greetingSent = true;
           setAiSpeaking(true, 5000);
 
@@ -1247,7 +1260,7 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
             const greeting = greetingEntry.greeting;
             let greetAudio = greetingEntry.audioBuf;
 
-            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Welcome greeting as per Cartesia delivered: "${greeting}" in ${Date.now() - tStart}ms`);
+            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Welcome greeting delivered: "${greeting}" in ${Date.now() - tStart}ms`);
 
             if (!greetAudio) {
               greetAudio = await synthesizeSpeech(greeting, voiceId);
