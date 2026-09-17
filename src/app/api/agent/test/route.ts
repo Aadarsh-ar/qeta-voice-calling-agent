@@ -12,69 +12,143 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { agentId, userMessage, conversationHistory = [], simulatedSttLatency } = body;
 
-    if (!userMessage) {
+    if (!userMessage && !body.textToSpeak) {
       return NextResponse.json(
-        { success: false, error: "User message is required." },
+        { success: false, error: "User message or textToSpeak is required." },
         { status: 400 }
       );
     }
 
-    let agent = agentId ? dataStore.getAgent(agentId) : dataStore.getAgents()[0];
-    if (!agent) {
-      try {
-        const { prisma } = await import("@/lib/db/prisma");
-        let dbAgent = agentId
-          ? await prisma.agent.findUnique({
-              where: { id: agentId },
-              include: { tools: true, knowledge: true, business: true },
-            })
-          : null;
+    let agent: any = undefined;
 
-        if (!dbAgent) {
-          dbAgent = await prisma.agent.findFirst({
-            where: { status: "ACTIVE" },
-            include: { tools: true, knowledge: true, business: true },
-          }) || await prisma.agent.findFirst({
+    if (agentId && typeof agentId === "string" && agentId.trim()) {
+      const cleanId = agentId.trim();
+      agent = dataStore.getAgent(cleanId);
+
+      if (!agent) {
+        try {
+          const { prisma } = await import("@/lib/db/prisma");
+          const dbAgent = await prisma.agent.findFirst({
+            where: {
+              OR: [
+                { id: cleanId },
+                { cartesiaAgentId: cleanId },
+              ],
+            },
             include: { tools: true, knowledge: true, business: true },
           });
-        }
 
-        if (dbAgent) {
-          let parsedBizProfile: any = undefined;
-          if (dbAgent.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
-            try { parsedBizProfile = JSON.parse(dbAgent.businessContext); } catch {}
+          if (dbAgent) {
+            let parsedBizProfile: any = undefined;
+            if (dbAgent.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
+              try { parsedBizProfile = JSON.parse(dbAgent.businessContext); } catch {}
+            }
+            const exactInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
+            agent = {
+              id: dbAgent.id,
+              name: dbAgent.name,
+              description: dbAgent.description || "",
+              language: dbAgent.language as any,
+              status: dbAgent.status as any,
+              systemPrompt: exactInstructions,
+              instructions: exactInstructions,
+              initialMessage: dbAgent.initialMessage || undefined,
+              businessContext: dbAgent.businessContext || "",
+              businessProfile: parsedBizProfile,
+              cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+              cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+              cartesiaModel: dbAgent.cartesiaModel,
+              llmModel: dbAgent.llmModel,
+              sarvamModel: dbAgent.sarvamModel,
+              sarvamLanguage: dbAgent.sarvamLanguage,
+              phoneNumber: "+91 80 7158 2667",
+              callsCount: 0,
+              totalMinutes: 0,
+              estimatedCost: 0,
+              lastActive: "Active",
+              createdAt: dbAgent.createdAt.toISOString(),
+              tools: dbAgent.tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                isEnabled: t.enabled && t.isEnabled,
+              })),
+              cartesiaAgentId: dbAgent.cartesiaAgentId || undefined,
+            };
+            dataStore.createAgentWithId(agent);
           }
-          agent = {
-            id: dbAgent.id,
-            name: dbAgent.name,
-            description: dbAgent.description || "",
-            language: dbAgent.language as any,
-            status: dbAgent.status as any,
-            systemPrompt: dbAgent.instructions || dbAgent.systemPrompt,
-            businessContext: dbAgent.businessContext || "",
-            businessProfile: parsedBizProfile,
-            cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-            cartesiaVoiceName: "AD (Cloned Telugu Voice)",
-            cartesiaModel: dbAgent.cartesiaModel,
-            llmModel: dbAgent.llmModel,
-            sarvamModel: dbAgent.sarvamModel,
-            sarvamLanguage: dbAgent.sarvamLanguage,
-            phoneNumber: "+91 80 7158 2667",
-            callsCount: 0,
-            totalMinutes: 0,
-            estimatedCost: 0,
-            lastActive: "Active",
-            createdAt: dbAgent.createdAt.toISOString(),
-            tools: dbAgent.tools.map((t) => ({
-              name: t.name,
-              description: t.description,
-              isEnabled: t.enabled && t.isEnabled,
-            })),
-            cartesiaAgentId: dbAgent.cartesiaAgentId || undefined,
-          };
+        } catch (e) {
+          console.warn("Prisma agent lookup failed in test route:", e);
         }
-      } catch (e) {
-        console.warn("Prisma agent lookup failed in test route:", e);
+      }
+    } else {
+      agent = dataStore.getAgents()[0];
+    }
+
+    // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, etc.)
+    if (body.ttsOnly) {
+      const textToSynthesize = (body.textToSpeak || userMessage || "").trim();
+      const voiceId = agent?.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
+      let audioBase64: string | null = null;
+      let audioBytes = 0;
+      if (cartesiaClient.isConfigured() && textToSynthesize) {
+        try {
+          const audioBuffer = await cartesiaClient.synthesize({
+            transcript: textToSynthesize,
+            voiceId,
+            modelId: "sonic-3.6",
+            encoding: "pcm_s16le",
+            sampleRate: 16000,
+          });
+          if (audioBuffer && audioBuffer.byteLength > 0) {
+            audioBase64 = Buffer.from(audioBuffer).toString("base64");
+            audioBytes = audioBuffer.byteLength;
+          }
+        } catch (e: any) {
+          console.warn("[TEST_ROUTE] ttsOnly Cartesia error:", e.message);
+        }
+      }
+      return NextResponse.json({
+        success: true,
+        normalizedReply: textToSynthesize,
+        rawReply: textToSynthesize,
+        audioBase64,
+        audioBytes,
+        agentId: agent?.id,
+        agentName: agent?.name,
+      });
+    }
+
+    // Direct instructions override if passed in request body (e.g. testing templates or unsaved site edits)
+    const customPrompt = (body.instructions || body.systemPrompt || "").trim();
+    if (customPrompt) {
+      if (!agent) {
+        agent = {
+          id: `test_${Date.now()}`,
+          name: body.agentName || "Custom Voice Agent",
+          description: "Browser Test Agent",
+          language: "TELUGU_ENGLISH",
+          status: "ACTIVE",
+          systemPrompt: customPrompt,
+          instructions: customPrompt,
+          cartesiaVoiceId: body.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+          cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+          cartesiaModel: "sonic-3.6",
+          llmModel: "gemini-2.5-flash",
+          sarvamModel: "saaras:v3-realtime",
+          sarvamLanguage: "te-IN",
+          callsCount: 0,
+          totalMinutes: 0,
+          estimatedCost: 0,
+          lastActive: "Just now",
+          createdAt: new Date().toISOString(),
+          tools: [],
+        };
+      } else {
+        agent = {
+          ...agent,
+          systemPrompt: customPrompt,
+          instructions: customPrompt,
+        };
       }
     }
 

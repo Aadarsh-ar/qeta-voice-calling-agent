@@ -84,7 +84,7 @@ export default function SettingsPage() {
         subtitle="Manage your organization profile, telephony rate matrix, and security policies"
       />
 
-      <div className="p-6 md:p-8 max-w-5xl w-full mx-auto space-y-6">
+      <div className="p-4 sm:p-6 md:p-8 max-w-5xl w-full mx-auto space-y-6">
         {toastMessage && (
           <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 shadow-xs">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
@@ -93,7 +93,7 @@ export default function SettingsPage() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="border-b border-[#EAEBE8] flex items-center gap-2">
+        <div className="border-b border-[#EAEBE8] flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
           {[
             { id: "organization", label: "Organization", icon: Building },
             { id: "pricing", label: "Pricing Rates", icon: Sliders },
@@ -105,13 +105,13 @@ export default function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                className={`flex items-center gap-2 px-5 py-3 text-xs font-bold border-b-2 transition-all ${
+                className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-xs font-bold border-b-2 transition-all shrink-0 whitespace-nowrap ${
                   isActive
                     ? "border-emerald-700 text-emerald-900 bg-emerald-50/60 rounded-t-xl"
                     : "border-transparent text-slate-500 hover:text-slate-900"
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? "text-emerald-700" : "text-slate-400"}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-emerald-700" : "text-slate-400"}`} />
                 {tab.label}
               </button>
             );
@@ -120,15 +120,15 @@ export default function SettingsPage() {
 
         {/* Tab 1: Organization */}
         {activeTab === "organization" && (
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-6">
-            <div className="flex items-center justify-between">
+          <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 tracking-tight">Organization Profile</h3>
                 <p className="text-xs text-slate-500">Manage company information and billing contact.</p>
               </div>
               <button
                 onClick={handleSaveProfile}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs"
+                className="self-start sm:self-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs"
               >
                 <Save className="w-3.5 h-3.5" /> Save Profile
               </button>
@@ -177,8 +177,8 @@ export default function SettingsPage() {
 
         {/* Tab 2: Provider Pricing Config */}
         {activeTab === "pricing" && (
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-6">
-            <div className="flex items-center justify-between">
+          <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 tracking-tight">
                   Dynamic Provider Pricing Matrix
@@ -190,7 +190,7 @@ export default function SettingsPage() {
 
               <button
                 onClick={handleSaveRates}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs"
+                className="self-start sm:self-auto px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-xs whitespace-nowrap"
               >
                 Save Pricing Matrix
               </button>

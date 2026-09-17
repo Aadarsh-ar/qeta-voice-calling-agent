@@ -8,9 +8,7 @@ import {
   Bot,
   Play,
   Languages,
-  Mic2,
   FileText,
-  Building2,
   Phone,
   Wrench,
   Clock,
@@ -20,16 +18,15 @@ import {
   CheckCircle2,
   Trash2,
   Copy,
-  Rocket,
-  Pause,
   AlertTriangle,
   X,
   Plus,
-  Volume2,
   Sparkles,
   MessageSquare,
   HelpCircle,
-  ShieldCheck,
+  RefreshCw,
+  ArrowDownToLine,
+  ArrowUpToLine,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { TestAgentModal } from "@/components/testing/TestAgentModal";
@@ -49,8 +46,8 @@ export default function AgentDetailPage({
   const [agent, setAgent] = useState<AgentItem | undefined>(dataStore.getAgent(agentId));
   const [isLoading, setIsLoading] = useState(!agent);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "instructions" | "voice" | "knowledge" | "tools" | "phone" | "activity"
-  >("overview");
+    "instructions" | "overview" | "tools" | "phone" | "activity"
+  >("instructions");
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [isRealCallOpen, setIsRealCallOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -61,11 +58,12 @@ export default function AgentDetailPage({
   const [name, setName] = useState(agent?.name || "");
   const [description, setDescription] = useState(agent?.description || "");
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt || "");
+  const [initialMessage, setInitialMessage] = useState(agent?.initialMessage || "");
   const [businessContext, setBusinessContext] = useState(agent?.businessContext || "");
   const [selectedPhone, setSelectedPhone] = useState(agent?.phoneNumber || "+91 80 7158 2667");
   const [tools, setTools] = useState(agent?.tools || []);
   const [cartesiaAgentId, setCartesiaAgentId] = useState(
-    agent?.cartesiaAgentId || (agent?.id?.startsWith("agent_") ? agent.id : "agent_GaiYMgB9Bj9kaKW1tUgqSQ")
+    agent?.cartesiaAgentId || (agent?.id?.startsWith("agent_") ? agent.id : "")
   );
   const [language, setLanguage] = useState<AgentLanguage>(
     (agent?.language as AgentLanguage) || AgentLanguage.TELUGU_ENGLISH
@@ -81,73 +79,116 @@ export default function AgentDetailPage({
     lastSyncedAt?: string;
     error?: string;
   } | null>(null);
-  const defaultTrainingExamples = [
-    {
-      question: "నా ఆర్డర్ ఇంకా రాలేదు, ఎప్పుడు వస్తుంది?",
-      replay: "అర్థమైంది అండి! మీ ఆర్డర్ డెలివరీ స్టేటస్ వెంటనే చూస్తాను. మీ ఆర్డర్ ఐడీ లేదా రిజిస్టర్డ్ మొబైల్ నంబర్ చెప్పగలరా?",
-    },
-    {
-      question: "నా దగ్గర ఆర్డర్ నంబర్ లేదు, మీరే చెప్పండి",
-      replay: "ఖచ్చితంగా అండి! మీ పూర్తి పేరు లేదా ఏ ఐటమ్ ఆర్డర్ చేశారో చెబితే నేను సిస్టమ్‌లో వెతికి వివరాలు చెబుతాను.",
-    },
-    {
-      question: "నాకు డెమో కావాలి లేదా మాట్లాడాలి",
-      replay: "చాలా సంతోషం అండి! రేపు ఉదయం 10:30 కి లేదా సాయంత్రం 4 గంటలకు మీకు ఏ సమయం అనుకూలంగా ఉంటుంది?",
-    },
-    {
-      question: "నాకు రీఫండ్ ఎప్పుడు వస్తుంది?",
-      replay: "రీఫండ్ ప్రాసెస్ 5 నుండి 7 పని దినాలలో మీ ఖాతాకు జమ అవుతుంది అండి. మీ ఆర్డర్ నంబర్ ధృవీకరించగలరా?",
-    },
-    {
-      question: "మీ ధర ఎంత ఉంటుంది?",
-      replay: "మా స్టార్టర్ ప్యాకేజ్ నెలకు ₹15,000 మాత్రమే అండి, ఇందులో 2,000 కాలింగ్ నిమిషాలు ఉంటాయి.",
-    },
-  ];
 
-  const defaultPolicies = {
-    refundPolicy: "రీఫండ్లు ఆర్డర్ డెలివరీ అయిన 7 రోజులలోపు మాత్రమే వర్తిస్తాయి. ఉత్పత్తి అసలైన స్థితిలో ఉండాలి.",
-    cancellationPolicy: "ఆర్డర్ షిప్పింగ్ కావడానికి ముందే కాల్ చేసి ఉచితంగా రద్దు చేసుకోవచ్చు.",
-    deliveryPolicy: "ఆర్డర్లు ఆర్డర్ చేసిన 2 నుండి 4 పని దినాలలో డెలివరీ చేయబడతాయి.",
-    warrantyPolicy: "అన్ని హార్డ్‌వేర్ పరికరాలకు 1 సంవత్సరం రీప్లేస్‌మెంట్ వారంటీ ఉంటుంది.",
-  };
+  // Section 10: Two-Way Sync & Configuration Drift Detection
+  const [driftData, setDriftData] = useState<{
+    checked: boolean;
+    hasDrift: boolean;
+    differences: Array<{ field: string; qetaValue: any; cartesiaValue: any }>;
+    cartesiaAgent?: any;
+    error?: string;
+  } | null>(null);
+  const [isCheckingDrift, setIsCheckingDrift] = useState(false);
+  const [isSyncingDrift, setIsSyncingDrift] = useState<"pull" | "push" | null>(null);
 
-  const [businessProfile, setBusinessProfile] = useState(
+  const [businessProfile, setBusinessProfile] = useState<any>(
     agent?.businessProfile || {
-      businessName: "Vaani Enterprises",
-      description: "AI Voice Automation Platform for Regional Languages.",
-      productsServices: "Telugu AI calling agents, automated lead qualification, customer service bots.",
-      workingHours: "ఉదయం 9:00 AM నుండి సాయంత్రం 7:00 PM వరకు",
-      location: "Hitec City, Hyderabad",
-      contactInfo: "contact@vaani.ai, +91 80 7158 2667",
-      faqs: [
-        {
-          question: "మీ ధర ఎంత ఉంటుంది?",
-          answer: "మా స్టార్టర్ ప్యాకేజ్ నెలకు ₹15,000 మాత్రమే, ఇందులో 2,000 కాలింగ్ నిమిషాలు ఉంటాయి.",
-        },
-      ],
+      businessName: "",
+      description: "",
+      productsServices: "",
+      workingHours: "",
+      location: "",
+      contactInfo: "",
+      faqs: [],
     }
   );
 
   const [trainingExamples, setTrainingExamples] = useState<{ question: string; replay: string }[]>(
-    agent?.businessProfile?.trainingExamples || defaultTrainingExamples
+    agent?.businessProfile?.trainingExamples || []
   );
 
   const [faqs, setFaqs] = useState<{ question: string; answer: string }[]>(
-    agent?.businessProfile?.faqs || [
-      {
-        question: "మీ ధర ఎంత ఉంటుంది?",
-        answer: "మా స్టార్టర్ ప్యాకేజ్ నెలకు ₹15,000 మాత్రమే, ఇందులో 2,000 కాలింగ్ నిమిషాలు ఉంటాయి.",
-      },
-    ]
+    agent?.businessProfile?.faqs || []
   );
 
   const [policies, setPolicies] = useState(
-    (agent?.businessProfile as any)?.policies || defaultPolicies
+    (agent?.businessProfile as any)?.policies || {
+      refundPolicy: "",
+      cancellationPolicy: "",
+      deliveryPolicy: "",
+      warrantyPolicy: "",
+    }
   );
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleCheckDrift = async () => {
+    setIsCheckingDrift(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/cartesia-sync`);
+      const d = await res.json();
+      if (d.success) {
+        setDriftData({
+          checked: true,
+          hasDrift: d.hasDrift,
+          differences: d.differences || [],
+          cartesiaAgent: d.cartesiaAgent,
+        });
+      } else {
+        setDriftData({
+          checked: true,
+          hasDrift: false,
+          differences: [],
+          error: d.error || "Could not query Cartesia",
+        });
+      }
+    } catch {
+      setDriftData({
+        checked: true,
+        hasDrift: false,
+        differences: [],
+        error: "Network error checking Cartesia drift",
+      });
+    } finally {
+      setIsCheckingDrift(false);
+    }
+  };
+
+  const handleSyncDirection = async (direction: "pull" | "push") => {
+    setIsSyncingDrift(direction);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/cartesia-sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: direction }),
+      });
+      const d = await res.json();
+      if (res.ok && d.success) {
+        showToast(
+          direction === "pull"
+            ? "Successfully pulled latest configuration from Cartesia!"
+            : "Successfully pushed configuration to Cartesia!"
+        );
+        if (direction === "pull" && d.qetaAgent) {
+          setName(d.qetaAgent.name);
+          setSystemPrompt(d.qetaAgent.instructions);
+          setInitialMessage(d.qetaAgent.initialMessage || "");
+          setCartesiaVoiceId(d.qetaAgent.cartesiaVoiceId);
+          setLanguage(d.qetaAgent.language);
+        }
+        await handleCheckDrift();
+      } else {
+        showToast(`Sync failed: ${d.error || "Provider error"}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Sync error";
+      showToast(`Sync error: ${msg}`);
+    } finally {
+      setIsSyncingDrift(null);
+    }
   };
 
   useEffect(() => {
@@ -158,6 +199,7 @@ export default function AgentDetailPage({
       setName(local.name);
       setDescription(local.description);
       setSystemPrompt(local.systemPrompt);
+      if (local.initialMessage !== undefined) setInitialMessage(local.initialMessage || "");
       setBusinessContext(local.businessContext || "");
       setSelectedPhone(local.phoneNumber || "+91 80 7158 2667");
       setTools(local.tools);
@@ -187,6 +229,9 @@ export default function AgentDetailPage({
           setName(data.agent.name);
           setDescription(data.agent.description || "");
           setSystemPrompt(data.agent.systemPrompt);
+          if (data.agent.initialMessage !== undefined) {
+            setInitialMessage(data.agent.initialMessage || "");
+          }
           setBusinessContext(data.agent.businessContext || "");
           setSelectedPhone(data.agent.phoneNumber || "+91 80 7158 2667");
           setTools(data.agent.tools || []);
@@ -205,10 +250,20 @@ export default function AgentDetailPage({
               setPolicies(data.agent.businessProfile.policies);
             }
           }
+          if (data.agent.lastSyncStatus === "SYNCED") {
+            setSyncStatus({
+              synced: true,
+              cartesiaVersionId: data.agent.cartesiaVersionId,
+              lastSyncedAt: data.agent.lastSyncedAt ? new Date(data.agent.lastSyncedAt).toLocaleTimeString() : undefined,
+            });
+          }
         }
       })
       .catch((err) => console.error("Error fetching agent detail:", err))
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        setIsLoading(false);
+        handleCheckDrift();
+      });
   }, [agentId]);
 
   if (isLoading && !agent) {
@@ -263,6 +318,7 @@ export default function AgentDetailPage({
           name,
           description,
           systemPrompt,
+          initialMessage,
           businessContext,
           language,
           cartesiaVoiceId,
@@ -279,6 +335,7 @@ export default function AgentDetailPage({
           name,
           description,
           systemPrompt,
+          initialMessage,
           businessContext,
           language,
           cartesiaVoiceId,
@@ -295,6 +352,7 @@ export default function AgentDetailPage({
                 name,
                 description,
                 systemPrompt,
+                initialMessage,
                 businessContext,
                 language,
                 cartesiaVoiceId,
@@ -313,6 +371,7 @@ export default function AgentDetailPage({
         setSaveStep("ready");
         showToast(`Ready • Synchronized with Cartesia! (Version: ${data.cartesiaVersionId || "Active"})`);
         setTimeout(() => setSaveStep("idle"), 3500);
+        handleCheckDrift();
       } else {
         const errorMsg = data.error || "Cartesia synchronization rejected configuration.";
         setSaveStep("error");
@@ -518,10 +577,8 @@ export default function AgentDetailPage({
   };
 
   const tabs = [
-    { id: "overview", label: "Overview", icon: Bot },
     { id: "instructions", label: "Instructions", icon: FileText },
-    { id: "voice", label: "Voice Engine", icon: Mic2 },
-    { id: "knowledge", label: "Business Knowledge", icon: Building2 },
+    { id: "overview", label: "Overview", icon: Bot },
     { id: "tools", label: "Tools", icon: Wrench },
     { id: "phone", label: "Phone & Telephony", icon: Phone },
     { id: "activity", label: "Call Activity", icon: PhoneCall },
@@ -531,7 +588,7 @@ export default function AgentDetailPage({
     <div className="flex-1 flex flex-col bg-[#FAFAF8] min-h-screen text-slate-900">
       <Header
         title={agent.name}
-        subtitle="Manage instructions, knowledge, tools, and call routing"
+        subtitle="Manage instructions, telephony routing, and test your voice agent"
         onOpenTestAgent={() => setIsTestModalOpen(true)}
         onOpenRealCall={() => setIsRealCallOpen(true)}
       />
@@ -587,6 +644,71 @@ export default function AgentDetailPage({
           </div>
         )}
 
+        {/* Section 10: Cartesia Drift Detection & Two-Way Sync Banner */}
+        {driftData?.hasDrift && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs shadow-xs animate-in fade-in space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 font-bold text-amber-900">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Configuration Drift Detected with Live Cartesia Runtime</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleSyncDirection("pull")}
+                  disabled={isSyncingDrift !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 text-xs font-semibold hover:bg-amber-100 transition disabled:opacity-50 shadow-2xs"
+                  title="Overwrite local settings with live Cartesia agent"
+                >
+                  <ArrowDownToLine className="w-3.5 h-3.5" />
+                  {isSyncingDrift === "pull" ? "Pulling..." : "Pull from Cartesia"}
+                </button>
+                <button
+                  onClick={() => handleSyncDirection("push")}
+                  disabled={isSyncingDrift !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 transition disabled:opacity-50 shadow-2xs"
+                  title="Overwrite live Cartesia agent with local settings"
+                >
+                  <ArrowUpToLine className="w-3.5 h-3.5" />
+                  {isSyncingDrift === "push" ? "Pushing..." : "Push to Cartesia"}
+                </button>
+              </div>
+            </div>
+            <div className="text-[11px] text-amber-850 space-y-1.5 pl-6">
+              <p className="font-medium text-slate-700">The following parameters differ between QETADOTIN and live Cartesia agent:</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
+                {driftData.differences.map((diff) => (
+                  <div key={diff.field} className="p-2.5 rounded-lg bg-white/90 border border-amber-200">
+                    <span className="font-bold uppercase text-[10px] text-amber-900 block mb-0.5">{diff.field}</span>
+                    <div className="text-[10px] text-slate-500 truncate" title={String(diff.qetaValue || "")}>
+                      <span className="font-semibold text-slate-700">Qeta:</span> {String(diff.qetaValue || "—")}
+                    </div>
+                    <div className="text-[10px] text-amber-900 truncate" title={String(diff.cartesiaValue || "")}>
+                      <span className="font-semibold text-amber-900">Cartesia:</span> {String(diff.cartesiaValue || "—")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {driftData?.checked && !driftData.hasDrift && !driftData.error && (
+          <div className="px-4 py-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between shadow-2xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Cartesia Parity Verified • Local configuration perfectly matches live runtime.</span>
+            </div>
+            <button
+              onClick={handleCheckDrift}
+              disabled={isCheckingDrift}
+              className="text-[11px] text-emerald-700 hover:text-emerald-900 flex items-center gap-1 font-semibold"
+            >
+              <RefreshCw className={`w-3 h-3 ${isCheckingDrift ? "animate-spin" : ""}`} />
+              {isCheckingDrift ? "Checking..." : "Re-verify"}
+            </button>
+          </div>
+        )}
+
         {/* Back Link & Header Banner */}
         <div className="space-y-3">
           <Link
@@ -605,30 +727,18 @@ export default function AgentDetailPage({
               <div>
                 <div className="flex items-center gap-2.5">
                   <h2 className="text-xl font-bold text-slate-900 tracking-tight">{agent.name}</h2>
-                  <button
-                    onClick={handleToggleDeploy}
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1.5 transition ${
-                      agent.status === AgentStatus.ACTIVE
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                        : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
-                    }`}
-                    title="Click to toggle status"
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        agent.status === AgentStatus.ACTIVE ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-                      }`}
-                    />
-                    {agent.status === AgentStatus.ACTIVE ? "Active & Ready" : "Paused"}
-                  </button>
+                  <div className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Active & Ready
+                  </div>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">{agent.description}</p>
-                <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-500">
-                  <span className="font-mono text-slate-800 font-semibold">{agent.phoneNumber || "+91 80 7158 2667"}</span>
+                <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-slate-500">
+                  <span className="text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {agent.cartesiaVoiceName || "AD (Cloned Telugu Voice)"}
+                  </span>
                   <span>•</span>
-                  <span className="text-indigo-600 font-semibold">{agent.cartesiaVoiceName || "AD (Cloned)"}</span>
-                  <span>•</span>
-                  <span>Telugu & English</span>
+                  <span>{agent.language === "TELUGU" ? "Telugu (Pure)" : "Telugu & English"}</span>
                 </div>
               </div>
             </div>
@@ -645,36 +755,12 @@ export default function AgentDetailPage({
                 Call Phone
               </button>
 
-              {/* Deploy / Pause Button */}
-              <button
-                onClick={handleToggleDeploy}
-                disabled={isDeploying}
-                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-xs ${
-                  agent.status === AgentStatus.ACTIVE
-                    ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200"
-                    : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20"
-                }`}
-                title={agent.status === AgentStatus.ACTIVE ? "Pause live calling" : "Deploy live to telephony"}
-              >
-                {agent.status === AgentStatus.ACTIVE ? (
-                  <>
-                    <Pause className="w-3.5 h-3.5" />
-                    Pause Agent
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="w-3.5 h-3.5" />
-                    {isDeploying ? "Deploying..." : "Deploy Agent"}
-                  </>
-                )}
-              </button>
-
               {/* Test Agent in browser */}
               <button
                 onClick={() => setIsTestModalOpen(true)}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition"
               >
-                <Play className="w-3.5 h-3.5 fill-current" />
+                <Play className="w-3.5 h-3.5 fill-current text-emerald-600" />
                 Test in Browser
               </button>
 
@@ -896,6 +982,24 @@ export default function AgentDetailPage({
                 />
               </div>
 
+              {/* Initial Message / Opening Greeting Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>Initial Greeting / Opening Message</span>
+                  <span className="text-[10px] text-indigo-600 font-mono font-normal">Cartesia initial_message</span>
+                </label>
+                <input
+                  type="text"
+                  value={initialMessage}
+                  onChange={(e) => setInitialMessage(e.target.value)}
+                  placeholder="e.g. హలో అండి, నేను కాలేజీ నుండి మాట్లాడుతున్నాను. మీకు ఎలా సహాయపడగలను?"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-900 text-xs font-sans leading-relaxed focus:outline-none focus:border-indigo-500 focus:bg-white"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Spoken immediately upon call pickup by Cartesia with zero latency.
+                </p>
+              </div>
+
               {/* Human Conversational Excellence & CSAT Guidelines Card */}
               <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-50/60 to-violet-50/40 border border-indigo-100 space-y-3">
                 <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs">
@@ -1010,44 +1114,6 @@ export default function AgentDetailPage({
             </div>
           )}
 
-          {/* Voice Tab */}
-          {activeTab === "voice" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">Voice Synthesis</h4>
-                  <p className="text-xs text-slate-500">Cartesia neural voice model for natural Telugu speech.</p>
-                </div>
-                <button
-                  onClick={() => setIsTestModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold hover:bg-indigo-100 transition"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  Audition Voice
-                </button>
-              </div>
-
-              <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-3 text-xs">
-                <div className="flex items-center justify-between py-1 border-b border-slate-200">
-                  <span className="text-slate-500">Cloned Voice Name:</span>
-                  <span className="font-semibold text-slate-900">AD (Telugu Cloned Voice)</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-slate-200">
-                  <span className="text-slate-500">Voice Engine Status:</span>
-                  <span className="font-semibold text-emerald-700">Active & Ready</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-slate-200">
-                  <span className="text-slate-500">Language:</span>
-                  <span className="font-semibold text-slate-900">Telugu (te)</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-500">Output Encoding:</span>
-                  <span className="font-mono text-slate-900">pcm_s16le @ 16,000 Hz</span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Tools Tab */}
           {activeTab === "tools" && (
             <div className="space-y-4">
@@ -1085,205 +1151,6 @@ export default function AgentDetailPage({
                     </span>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Knowledge Tab */}
-          {activeTab === "knowledge" && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">Business Knowledge, Policies & FAQs</h4>
-                  <p className="text-xs text-slate-500">
-                    Grounded knowledge used by the agent to answer customer inquiries accurately.
-                  </p>
-                </div>
-                {renderSaveButton("Save Knowledge & Policies")}
-              </div>
-
-              {/* Core Business Details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Business Name</label>
-                  <input
-                    type="text"
-                    value={businessProfile.businessName}
-                    onChange={(e) =>
-                      setBusinessProfile({ ...businessProfile, businessName: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Working Hours</label>
-                  <input
-                    type="text"
-                    value={businessProfile.workingHours}
-                    onChange={(e) =>
-                      setBusinessProfile({ ...businessProfile, workingHours: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Office Location</label>
-                  <input
-                    type="text"
-                    value={businessProfile.location || ""}
-                    onChange={(e) =>
-                      setBusinessProfile({ ...businessProfile, location: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Contact Email & Phone</label>
-                  <input
-                    type="text"
-                    value={businessProfile.contactInfo || ""}
-                    onChange={(e) =>
-                      setBusinessProfile({ ...businessProfile, contactInfo: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-slate-700 font-semibold mb-1">Products & Services</label>
-                  <input
-                    type="text"
-                    value={businessProfile.productsServices}
-                    onChange={(e) =>
-                      setBusinessProfile({ ...businessProfile, productsServices: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              {/* Customer Service & Business Policies */}
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                <div className="flex items-center gap-2 text-slate-900 font-bold text-xs">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  Customer Service Policies (Grounded In Spoken Responses)
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <label className="block font-bold text-slate-700">Return & Refund Policy</label>
-                    <textarea
-                      rows={2}
-                      value={policies.refundPolicy || ""}
-                      onChange={(e) => setPolicies({ ...policies, refundPolicy: e.target.value })}
-                      className="w-full p-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                      placeholder="e.g. 7 రోజుల లోపు రిటర్న్ అభ్యర్థించవచ్చు..."
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <label className="block font-bold text-slate-700">Cancellation Policy</label>
-                    <textarea
-                      rows={2}
-                      value={policies.cancellationPolicy || ""}
-                      onChange={(e) => setPolicies({ ...policies, cancellationPolicy: e.target.value })}
-                      className="w-full p-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                      placeholder="e.g. డిస్పాచ్ కావడానికి ముందే ఆర్డర్ రద్దు చేసుకోవచ్చు..."
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <label className="block font-bold text-slate-700">Delivery Timelines</label>
-                    <textarea
-                      rows={2}
-                      value={policies.deliveryPolicy || ""}
-                      onChange={(e) => setPolicies({ ...policies, deliveryPolicy: e.target.value })}
-                      className="w-full p-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                      placeholder="e.g. 2 నుండి 4 పని దినాలలో డెలివరీ..."
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                    <label className="block font-bold text-slate-700">Warranty & Guarantee</label>
-                    <textarea
-                      rows={2}
-                      value={policies.warrantyPolicy || ""}
-                      onChange={(e) => setPolicies({ ...policies, warrantyPolicy: e.target.value })}
-                      className="w-full p-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                      placeholder="e.g. 1 సంవత్సరం రీప్లేస్‌మెంట్ వారంటీ..."
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Interactive Business FAQs */}
-              <div className="pt-4 border-t border-slate-100 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-slate-900">Frequently Asked Questions (FAQs)</h4>
-                      <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-200">
-                        {faqs.length} FAQs
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      The agent grounds its factual answers in these verified questions and answers.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleAddFAQ}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add FAQ
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {faqs.map((f, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/40 space-y-2.5 transition hover:border-slate-300"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
-                          FAQ #{idx + 1}
-                        </span>
-                        {faqs.length > 1 && (
-                          <button
-                            onClick={() => handleDeleteFAQ(idx)}
-                            className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition"
-                            title="Delete FAQ"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Question:</label>
-                          <input
-                            type="text"
-                            value={f.question}
-                            onChange={(e) => handleUpdateFAQ(idx, "question", e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                            placeholder="e.g. మీ ధర ఎంత?"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Answer:</label>
-                          <textarea
-                            rows={2}
-                            value={f.answer}
-                            onChange={(e) => handleUpdateFAQ(idx, "answer", e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
-                            placeholder="e.g. మా స్టార్టర్ ప్యాకేజ్ నెలకు ₹15,000 మాత్రమే..."
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           )}
@@ -1393,6 +1260,9 @@ export default function AgentDetailPage({
         onClose={() => setIsTestModalOpen(false)}
         agentId={agent.id}
         agentName={agent.name}
+        systemPrompt={systemPrompt}
+        instructions={systemPrompt}
+        initialGreeting={initialMessage || agent.initialMessage}
       />
 
       <RealPhoneCallModal

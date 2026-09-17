@@ -211,75 +211,77 @@ export default function PhoneNumbersPage() {
 
         {/* Numbers Table */}
         <div className="ref-card overflow-hidden bg-white">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-[#FAFAF8] border-b border-[#EAEBE8] text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-              <tr>
-                <th className="px-5 py-3.5">Phone Number</th>
-                <th className="px-5 py-3.5">Provider</th>
-                <th className="px-5 py-3.5">Assigned Agent</th>
-                <th className="px-5 py-3.5">Status</th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {numbers.map((num) => (
-                <tr key={num.id} className="hover:bg-slate-50/80 transition">
-                  <td className="px-5 py-4 font-mono font-bold text-slate-900 flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-indigo-600" />
-                    {num.e164Number}
-                  </td>
-                  <td className="px-5 py-4 text-slate-600 font-medium">{num.provider}</td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-2 text-slate-900 font-semibold">
-                      <Bot className="w-4 h-4 text-indigo-600" />
-                      {num.assignedAgentName || "Unassigned"}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4">
-                    <button
-                      onClick={() => handleToggleNumberStatus(num.id)}
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1 w-max transition ${
-                        num.status === "Active"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                          : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
-                      }`}
-                      title="Click to toggle status"
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          num.status === "Active" ? "bg-emerald-500" : "bg-amber-500"
-                        }`}
-                      />
-                      {num.status}
-                    </button>
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => setIsPhoneModalOpen(true)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold transition"
-                      >
-                        Dial (+91)
-                      </button>
-                      <button
-                        onClick={() => setNumberToAssign(num)}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition"
-                      >
-                        Assign Agent
-                      </button>
-                      <button
-                        onClick={() => handleDeleteNumber(num.id)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition border border-transparent hover:border-rose-200"
-                        title="Release Phone Number"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[650px]">
+              <thead className="bg-[#FAFAF8] border-b border-[#EAEBE8] text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="px-5 py-3.5">Phone Number</th>
+                  <th className="px-5 py-3.5">Provider</th>
+                  <th className="px-5 py-3.5">Assigned Agent</th>
+                  <th className="px-5 py-3.5">Status</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {numbers.map((num) => (
+                  <tr key={num.id} className="hover:bg-slate-50/80 transition">
+                    <td className="px-5 py-4 font-mono font-bold text-slate-900 flex items-center gap-2">
+                      <Phone className="w-4 h-4 text-indigo-600" />
+                      {num.e164Number}
+                    </td>
+                    <td className="px-5 py-4 text-slate-600 font-medium">{num.provider}</td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2 text-slate-900 font-semibold">
+                        <Bot className="w-4 h-4 text-indigo-600" />
+                        {num.assignedAgentName || "Unassigned"}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <button
+                        onClick={() => handleToggleNumberStatus(num.id)}
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1 w-max transition ${
+                          num.status === "Active"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                            : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                        }`}
+                        title="Click to toggle status"
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            num.status === "Active" ? "bg-emerald-500" : "bg-amber-500"
+                          }`}
+                        />
+                        {num.status}
+                      </button>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setIsPhoneModalOpen(true)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold transition"
+                        >
+                          Dial (+91)
+                        </button>
+                        <button
+                          onClick={() => setNumberToAssign(num)}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold transition"
+                        >
+                          Assign Agent
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNumber(num.id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition border border-transparent hover:border-rose-200"
+                          title="Release Phone Number"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

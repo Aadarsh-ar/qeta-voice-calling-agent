@@ -169,6 +169,7 @@ export async function POST(req: Request) {
         cartesiaAgentId: targetCartesiaAgentId,
         agentName: name.trim(),
         instructions: agentInstructions,
+        initialMessage: body.initialMessage,
         businessName: bizProfile.businessName,
         businessDescription: bizProfile.description,
         businessInformation: bizProfile.productsServices,
@@ -318,6 +319,14 @@ export async function POST(req: Request) {
       phoneNumber: phoneToAssign,
       updatedAt: createdAgent.updatedAt.toISOString(),
     });
+
+    // Invalidate server.js in-memory greeting and agent metadata cache
+    try {
+      const port = process.env.PORT || "3000";
+      await fetch(`http://127.0.0.1:${port}/api/agent/cache-invalidate?agentId=${encodeURIComponent(createdAgent.id)}`, {
+        method: "POST",
+      }).catch(() => {});
+    } catch {}
 
     return NextResponse.json({
       success: true,

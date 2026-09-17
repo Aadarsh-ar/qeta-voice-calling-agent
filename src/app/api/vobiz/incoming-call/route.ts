@@ -33,16 +33,19 @@ export async function POST(req: Request) {
       wsUrl += `?${queryString}`;
     }
 
-    console.log(`[CALL_STARTED] Vobiz Answer Webhook hit (agent: ${agentId || "default"}) → Connecting bidirectional stream to: ${wsUrl}`);
+    console.log(`[LATENCY_TRACE] ANSWERED → Vobiz Answer Webhook received for agent: ${agentId || "default"}, caller: ${callerNumber || "unknown"}`);
+    console.log(`[LATENCY_TRACE] MEDIA_CONNECTING → Returning stream XML targeting: ${wsUrl}`);
 
     // In XML, bare & inside a text node causes fatal "Invalid Answer XML"
     const safeWsUrl = wsUrl.replace(/&/g, "&amp;");
 
     // Vobiz official bidirectional stream specification:
-    // audio/x-mulaw at 8000Hz (telephony standard)
+    // audio/x-mulaw at 8000Hz (telephony standard).
+    // Note: audioTrack="inbound" must NOT be set when bidirectional="true" because
+    // it can suppress outbound playAudio playback on carrier network.
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Stream bidirectional="true" audioTrack="inbound" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">${safeWsUrl}</Stream>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">${safeWsUrl}</Stream>
 </Response>`.trim();
 
     return new NextResponse(xml, {
@@ -51,7 +54,7 @@ export async function POST(req: Request) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown webhook error";
-    console.error(`[ERROR] incoming-call error: ${message}`);
+    console.error(`[ERROR] incoming-call webhook exception: ${message}`);
     return new NextResponse(
       `<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`,
       { status: 500, headers: { "Content-Type": "application/xml" } }

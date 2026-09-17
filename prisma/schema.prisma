@@ -156,6 +156,11 @@ model Agent {
   sarvamLanguage   String        @default("te-IN")
   phoneNumberId    String?       @unique
   businessId       String?
+  initialMessage   String?       @db.Text
+  cartesiaVersionId String?
+  lastSyncedAt     DateTime?
+  lastSyncStatus   String?       @default("SYNCED")
+  lastSyncError    String?       @db.Text
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

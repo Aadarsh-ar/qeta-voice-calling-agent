@@ -157,7 +157,7 @@ export default function AgentsPage() {
         }}
       />
 
-      <div className="p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
+      <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
         {/* Toast Notification */}
         {toastMessage && (
           <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in">
@@ -179,7 +179,7 @@ export default function AgentsPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full sm:w-auto">
             <button
               onClick={() => {
                 setRealCallAgentId(undefined);
@@ -236,22 +236,12 @@ export default function AgentsPage() {
                     </div>
                     <div>
                       <h4 className="font-heading font-bold text-slate-900 text-base tracking-tight">{agent.name}</h4>
-                      <button
-                        onClick={() => handleToggleStatus(agent.id)}
-                        className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 mt-1 transition ${
-                          agent.status === "ACTIVE"
-                            ? "bg-emerald-100 text-emerald-800 border border-emerald-200 hover:bg-emerald-200"
-                            : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
-                        }`}
-                        title="Click to toggle Active / Paused"
+                      <div
+                        className="text-[10px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 mt-1 bg-emerald-100 text-emerald-800 border border-emerald-200 w-fit"
                       >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            agent.status === "ACTIVE" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-                          }`}
-                        />
-                        {agent.status === "ACTIVE" ? "Active & Deployed" : "Paused"}
-                      </button>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Active & Ready
+                      </div>
                     </div>
                   </div>
 
@@ -276,7 +266,7 @@ export default function AgentsPage() {
                     <span>Phone Line:</span>
                     <span className="font-mono font-medium text-slate-800 flex items-center gap-1">
                       <Phone className="w-3 h-3 text-emerald-600" />
-                      {agent.phoneNumber || "+91 80 7158 2667"}
+                      {agent.phoneNumber && !agent.phoneNumber.includes("7136") ? agent.phoneNumber : "+91 80 7158 2667"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-slate-500">

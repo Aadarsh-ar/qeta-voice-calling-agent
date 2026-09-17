@@ -29,6 +29,7 @@ export interface AgentItem {
   language: AgentLanguage;
   status: AgentStatus;
   systemPrompt: string;
+  instructions?: string;
   businessContext?: string;
   cartesiaVoiceId: string;
   cartesiaVoiceName: string;
@@ -61,6 +62,11 @@ export interface AgentItem {
     trainingExamples?: { question: string; replay: string }[];
     toneGuidelines?: string;
   };
+  initialMessage?: string;
+  cartesiaVersionId?: string;
+  lastSyncedAt?: string;
+  lastSyncStatus?: "SYNCED" | "SYNC_REQUIRED" | "SYNC_FAILED" | "SYNCING";
+  lastSyncError?: string;
   isDemo?: boolean;
 }
 
@@ -110,6 +116,24 @@ export interface CallItem {
     infraCost: number;
   };
   isDemo?: boolean;
+  // Lifecycle & Diagnostic fields
+  stage?: string;
+  vobizCallId?: string;
+  cartesiaAgentId?: string;
+  hangupCause?: string;
+  hangupSource?: string;
+  terminationReason?: string;
+  lastSuccessfulStage?: string;
+  mediaConnected?: boolean;
+  cartesiaConnected?: boolean;
+  greetingStarted?: boolean;
+  greetingCompleted?: boolean;
+  audioFramesReceived?: number;
+  audioFramesSent?: number;
+  bytesReceived?: number;
+  bytesSent?: number;
+  firstAudioTimestamp?: string;
+  lastAudioTimestamp?: string;
 }
 
 export interface PhoneNumberItem {
@@ -174,7 +198,7 @@ class DataStore {
       description: "Carrier telephony, Indian phone numbers, and bidirectional audio streaming.",
       status: IntegrationStatus.CONNECTED,
       config: {
-        outboundNumber: "+911171366938",
+        outboundNumber: "+91 80 7158 2667",
         audioFormat: "audio/x-l16",
         sampleRate: 16000,
       },
@@ -231,6 +255,49 @@ class DataStore {
 
   private agents: AgentItem[] = [
     {
+      id: "agent_minb6qwKNfwWXLV8gyRfRq",
+      name: "College Attendance Notification (COMPLAINT)",
+      description: "College Faculty attendance notification voice agent communicating with parents in polite natural Telugu.",
+      language: AgentLanguage.TELUGU,
+      status: AgentStatus.ACTIVE,
+      systemPrompt: `# పాత్ర (Role)\n\nనువ్వు College లో పనిచేసే ఒక కాలేజ్ లెక్చరర్ / ఫ్యాకల్టీ మెంబర్‌గా విద్యార్థి తల్లిదండ్రులకు ఫోన్ చేసే AI Voice Agent.\n\nనీ ప్రధాన ఉద్దేశ్యం విద్యార్థి attendance తక్కువగా ఉందని తల్లిదండ్రులకు మర్యాదగా తెలియజేయడం.\n\nGreeting: “హలో అండి, నేను Naresh గారి పేరెంట్స్‌తో మాట్లాడుతున్నానా?”`,
+      businessContext: "College of Engineering — Department of Computer Science & Engineering.",
+      cartesiaVoiceId: "89907713-42ce-4ddd-8ff5-301211c564c1",
+      cartesiaAgentId: "agent_minb6qwKNfwWXLV8gyRfRq",
+      cartesiaVoiceName: "Telugu Female Faculty Voice",
+      cartesiaModel: "sonic-3.6",
+      llmModel: "gemini-2.5-flash",
+      sarvamModel: "saaras:v3-realtime",
+      sarvamLanguage: "te-IN",
+      phoneNumber: "+91 80 7158 2667",
+      callsCount: 0,
+      totalMinutes: 0,
+      estimatedCost: 0,
+      lastActive: "Active & Deployed",
+      createdAt: new Date().toISOString(),
+      tools: [
+        { name: "end_call", description: "End call politely when conversation concludes", isEnabled: true },
+        { name: "transfer_call", description: "Transfer to department head (+916305367443)", isEnabled: true },
+      ],
+      businessProfile: {
+        businessName: "College of Engineering",
+        description: "Premier engineering college and academic institution.",
+        productsServices: "Computer Science & Engineering, Academic Programs, Attendance Management",
+        workingHours: "Monday to Friday 9:00 AM - 5:00 PM IST",
+        location: "College Campus, Department of CSE",
+        contactInfo: "+91 80 7158 2667",
+        faqs: [
+          { question: "Required attendance ఎంత?", answer: "కాలేజ్ attendance requirement 75 శాతం సార్." },
+        ],
+        toneGuidelines: "Polite, caring, respectful, natural spoken Telugu.",
+        trainingExamples: [],
+      },
+      initialMessage: "“హలో అండి, నేను Naresh గారి పేరెంట్స్‌తో మాట్లాడుతున్నానా?”",
+      lastSyncedAt: new Date().toISOString(),
+      lastSyncStatus: "SYNCED",
+      isDemo: false,
+    },
+    {
       id: "agent_GaiYMgB9Bj9kaKW1tUgqSQ",
       name: "ABC Support (Active)",
       description: "Published native Cartesia conversational voice agent powered by Gemini 2.5 Flash and cloned Telugu voice. End-to-end voice intelligence.",
@@ -257,19 +324,22 @@ class DataStore {
         { name: "capture_customer_details", description: "Save caller name and requirements", isEnabled: true },
       ],
       businessProfile: {
-        businessName: "QETADOTIN",
-        description: "India's leading autonomous voice intelligence platform for Telugu and regional businesses.",
-        productsServices: "AI Voice Agents, Realtime Inbound Telephony, WhatsApp Calling, Outbound Qualification",
+        businessName: "ABC Electronics",
+        description: "Retail and home appliances customer service.",
+        productsServices: "Consumer electronics, home appliances, customer support",
         workingHours: "Monday to Saturday 9:00 AM - 7:00 PM IST",
         location: "Hitec City, Hyderabad",
-        contactInfo: "support@qetadotin.com",
+        contactInfo: "+91 80 7158 2667",
         faqs: [
-          { question: "మీ స్టార్టర్ ప్లాన్ ఎంత?", answer: "మా స్టార్టర్ ప్లాన్ నెలకు ₹2,999 మాత్రమే." },
-          { question: "డెమో ఎలా పొందాలి?", answer: "డెమో అని చెబితే వెంటనే 15 నిమిషాల స్లాట్ బుక్ చేస్తాను." },
+          { question: "మీ refund policy ఏంటి?", answer: "డెలివరీ అయిన 7 రోజులలోపు రీఫండ్ అభ్యర్థించవచ్చు అండి." },
+          { question: "మీరు ఎక్కడ ఉన్నారు?", answer: "మా ABC Electronics షోరూమ్ హైదరాబాద్ హైటెక్ సిటీ లో ఉంది అండి." },
         ],
         toneGuidelines: "Warm, professional, crisp Telugu and Tenglish.",
         trainingExamples: [],
       },
+      initialMessage: "హలో అండి! నేను Aadarsh మాట్లాడుతున్నాను, ABC Electronics నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?",
+      lastSyncedAt: new Date().toISOString(),
+      lastSyncStatus: "SYNCED",
       isDemo: false,
     },
   ];
@@ -467,7 +537,9 @@ class DataStore {
   }
 
   getAgent(id: string): AgentItem | undefined {
-    return this.agents.find((a) => a.id === id);
+    if (!id) return undefined;
+    const cleanId = id.trim();
+    return this.agents.find((a) => a.id === cleanId || a.cartesiaAgentId === cleanId);
   }
 
   createAgent(agent: Omit<AgentItem, "id" | "callsCount" | "totalMinutes" | "estimatedCost" | "lastActive" | "createdAt">): AgentItem {
@@ -553,6 +625,19 @@ class DataStore {
 
   addCall(call: CallItem): void {
     this.calls.unshift(call);
+  }
+
+  updateCall(id: string, updates: Partial<CallItem>): CallItem | undefined {
+    const idx = this.calls.findIndex((c) => c.id === id || c.vobizCallId === id || c.callNumber === id);
+    if (idx !== -1) {
+      this.calls[idx] = { ...this.calls[idx], ...updates };
+      return this.calls[idx];
+    }
+    return undefined;
+  }
+
+  findCallByProviderId(vobizCallId: string): CallItem | undefined {
+    return this.calls.find((c) => c.vobizCallId === vobizCallId);
   }
 
   // Phone Numbers

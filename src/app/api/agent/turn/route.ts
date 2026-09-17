@@ -17,68 +17,77 @@ export async function POST(req: Request) {
       action,
     } = body;
 
-    // 1. Resolve agent from dataStore or Neon PostgreSQL
-    let agent: AgentItem | undefined = agentId
-      ? dataStore.getAgent(agentId)
-      : dataStore.getAgents()[0];
+    // 1. Resolve agent strictly from dataStore or Neon PostgreSQL
+    let agent: AgentItem | undefined = undefined;
 
-    if (!agent && agentId) {
-      try {
-        let dbAgent = await prisma.agent.findUnique({
-          where: { id: agentId },
-          include: { tools: true },
-        });
-        if (!dbAgent) {
-          dbAgent = await prisma.agent.findFirst({
-            where: { status: "ACTIVE" },
-            include: { tools: true },
-          }) || await prisma.agent.findFirst({
-            include: { tools: true },
+    if (agentId && typeof agentId === "string" && agentId.trim()) {
+      const cleanId = agentId.trim();
+      agent = dataStore.getAgent(cleanId);
+
+      if (!agent) {
+        try {
+          const dbAgent = await prisma.agent.findFirst({
+            where: {
+              OR: [
+                { id: cleanId },
+                { cartesiaAgentId: cleanId },
+              ],
+            },
+            include: { tools: true, business: true },
           });
-        }
-        if (dbAgent) {
-          let parsedBizProfile: any = undefined;
-          if (dbAgent.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
-            try {
-              parsedBizProfile = JSON.parse(dbAgent.businessContext);
-            } catch {}
+
+          if (dbAgent) {
+            let parsedBizProfile: any = undefined;
+            if (dbAgent.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
+              try { parsedBizProfile = JSON.parse(dbAgent.businessContext); } catch {}
+            }
+
+            const exactInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
+
+            agent = {
+              id: dbAgent.id,
+              name: dbAgent.name,
+              description: dbAgent.description || "",
+              language: dbAgent.language as any,
+              status: dbAgent.status as any,
+              systemPrompt: exactInstructions,
+              instructions: exactInstructions,
+              initialMessage: dbAgent.initialMessage || undefined,
+              businessContext: dbAgent.businessContext || "",
+              businessProfile: parsedBizProfile,
+              cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+              cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+              cartesiaModel: dbAgent.cartesiaModel,
+              llmModel: dbAgent.llmModel,
+              sarvamModel: dbAgent.sarvamModel,
+              sarvamLanguage: dbAgent.sarvamLanguage,
+              phoneNumber: "+91 80 7158 2667",
+              callsCount: 0,
+              totalMinutes: 0,
+              estimatedCost: 0,
+              lastActive: "Active",
+              createdAt: dbAgent.createdAt.toISOString(),
+              tools: dbAgent.tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                isEnabled: t.isEnabled,
+              })),
+            };
+            dataStore.createAgentWithId(agent);
           }
-
-          agent = {
-            id: dbAgent.id,
-            name: dbAgent.name,
-            description: dbAgent.description || "",
-            language: dbAgent.language as any,
-            status: dbAgent.status as any,
-            systemPrompt: dbAgent.systemPrompt,
-            businessContext: dbAgent.businessContext || "",
-            businessProfile: parsedBizProfile,
-            cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-            cartesiaVoiceName: "AD (Cloned Telugu Voice)",
-            cartesiaModel: dbAgent.cartesiaModel,
-            llmModel: dbAgent.llmModel,
-            sarvamModel: dbAgent.sarvamModel,
-            sarvamLanguage: dbAgent.sarvamLanguage,
-            phoneNumber: "+91 80 7158 2667",
-            callsCount: 0,
-            totalMinutes: 0,
-            estimatedCost: 0,
-            lastActive: "Active",
-            createdAt: dbAgent.createdAt.toISOString(),
-            tools: dbAgent.tools.map((t) => ({
-              name: t.name,
-              description: t.description,
-              isEnabled: t.isEnabled,
-            })),
-          };
-          dataStore.createAgentWithId(agent);
+        } catch (dbErr) {
+          console.warn("[TURN_RESOLVE_ERR]", dbErr);
         }
-      } catch {
-        // Fallback to default agent
       }
-    }
 
-    if (!agent) {
+      if (!agent) {
+        console.error(`[TURN_ERROR] Agent "${cleanId}" not found in database. Intermixing prevented.`);
+        return NextResponse.json(
+          { success: false, error: `Agent "${cleanId}" not found` },
+          { status: 404 }
+        );
+      }
+    } else {
       agent = dataStore.getAgents()[0];
     }
 

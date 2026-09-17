@@ -91,7 +91,7 @@ export default function PricingPage() {
             </h1>
 
             <p className="text-slate-600 text-base sm:text-lg leading-relaxed max-w-2xl mb-8">
-              Every plan includes Cartesia neural speech synthesis, Vobiz PSTN carrier connectivity, and sub-150ms real-time conversational processing.
+              Every plan includes ultra-natural neural speech synthesis, dedicated business phone connectivity, and real-time conversational processing.
             </p>
 
             {/* Toggle Monthly / Annual */}

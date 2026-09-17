@@ -67,11 +67,11 @@ export function LandingHeader() {
                     Interactive Console
                   </Link>
                   <Link
-                    href="/integrations"
+                    href="/templates"
                     className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition flex items-center gap-2"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    API Documentation
+                    Agent Templates
                   </Link>
                   <Link
                     href="/phone-numbers"
@@ -95,7 +95,7 @@ export function LandingHeader() {
             Sign in
           </Link>
           <Link
-            href="/signup"
+            href="/login"
             className="btn-emerald-primary text-[13px] px-5 py-2.5 shadow-sm"
           >
             <span>Get started</span>
@@ -163,7 +163,7 @@ export function LandingHeader() {
               Sign in
             </Link>
             <Link
-              href="/signup"
+              href="/login"
               onClick={() => setMobileMenuOpen(false)}
               className="btn-emerald-primary w-full text-center text-sm py-2.5"
             >

@@ -253,7 +253,7 @@ export default function IntegrationsPage() {
         subtitle="Manage verified telephony, voice models, speech synthesis, and cloud AI providers"
       />
 
-      <div className="p-6 md:p-8 max-w-7xl w-full mx-auto space-y-6">
+      <div className="p-4 sm:p-6 md:p-8 max-w-7xl w-full mx-auto space-y-6">
         {/* Toast Notification */}
         {toastMessage && (
           <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in">
@@ -263,7 +263,7 @@ export default function IntegrationsPage() {
         )}
 
         {/* Global Connection Summary Card */}
-        <div className="ref-card p-6 bg-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="ref-card p-4 sm:p-6 bg-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-emerald-100/80 border border-emerald-200 flex items-center justify-center text-emerald-800 shrink-0">
               <Blocks className="w-6 h-6" />
@@ -390,7 +390,7 @@ export default function IntegrationsPage() {
       {/* Configure Modal */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">

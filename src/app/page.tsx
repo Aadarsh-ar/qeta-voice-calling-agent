@@ -60,7 +60,7 @@ export default function HomePage() {
               <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto">
                 {/* Primary CTA */}
                 <Link
-                  href="/signup"
+                  href="/login"
                   className="btn-emerald-primary text-sm sm:text-base px-7 py-3.5 shadow-md group"
                 >
                   <span>Get started</span>
@@ -78,22 +78,6 @@ export default function HomePage() {
                   </span>
                   <span>Listen to a live agent</span>
                 </button>
-              </div>
-
-              {/* Trust Subtext */}
-              <div className="flex items-center gap-4 mt-8 pt-6 border-t border-[#EAEBE8] text-xs text-slate-500 font-medium">
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Sub-150ms Response
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  PSTN Indian Numbers (+91)
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Cartesia Cloned Voices
-                </span>
               </div>
             </div>
 
@@ -198,7 +182,7 @@ export default function HomePage() {
                 Extreme low-latency telephony runtime with human conversational pacing.
               </h2>
               <p className="text-slate-600 text-base leading-relaxed">
-                QETADOTIN pairs Cartesia's state-of-the-art neural voice streaming with Vobiz carrier-grade SIP trunking for sub-150ms roundtrip audio delivery.
+                QETADOTIN delivers state-of-the-art neural voice streaming with enterprise-grade telephony for real-time natural conversations.
               </p>
 
               <div className="space-y-4 pt-2">
@@ -341,7 +325,7 @@ export default function HomePage() {
 
           <div className="flex flex-wrap items-center justify-center gap-4">
             <Link
-              href="/signup"
+              href="/login"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-full bg-white text-emerald-950 font-bold text-sm sm:text-base hover:bg-emerald-50 transition shadow-xl hover:scale-105 active:scale-95 duration-200"
             >
               <span>Get started with QETADOTIN</span>

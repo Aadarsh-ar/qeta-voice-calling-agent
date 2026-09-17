@@ -10,7 +10,6 @@ import {
   Phone,
   Zap,
   BarChart3,
-  Blocks,
   Settings,
   Layers,
   ChevronLeft,
@@ -18,9 +17,11 @@ import {
   Radio,
   ExternalLink,
   Sparkles,
+  X,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { TestAgentModal } from "@/components/testing/TestAgentModal";
+import { useLayout } from "@/components/layout/LayoutContext";
 
 interface NavSection {
   title: string;
@@ -34,7 +35,12 @@ interface NavSection {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const {
+    isMobileNavOpen,
+    closeMobileNav,
+    isCollapsed,
+    toggleCollapsed,
+  } = useLayout();
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
 
   const sections: NavSection[] = [
@@ -51,14 +57,12 @@ export function Sidebar() {
       title: "Telephony",
       items: [
         { label: "Phone Numbers", href: "/phone-numbers", icon: Phone, badge: "+91" },
-        { label: "Calling Channels", href: "/calling", icon: Zap },
       ],
     },
     {
       title: "Platform",
       items: [
         { label: "Analytics", href: "/analytics", icon: BarChart3 },
-        { label: "Integrations", href: "/integrations", icon: Blocks },
         { label: "Settings", href: "/settings", icon: Settings },
       ],
     },
@@ -66,28 +70,57 @@ export function Sidebar() {
 
   return (
     <>
+      {/* Mobile Backdrop Overlay */}
+      {isMobileNavOpen && (
+        <div
+          onClick={closeMobileNav}
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-40 md:hidden transition-opacity duration-300 animate-in fade-in"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar Aside element */}
       <aside
-        className={`fixed top-0 left-0 z-40 h-screen transition-all duration-300 border-r border-[#EAEBE8] bg-[#FAFAF8] flex flex-col justify-between ${
-          collapsed ? "w-20" : "w-64"
+        className={`fixed top-0 left-0 z-50 h-screen bg-[#FAFAF8] border-r border-[#EAEBE8] flex flex-col justify-between transition-all duration-300 ${
+          /* Mobile Drawer Positioning */
+          isMobileNavOpen
+            ? "translate-x-0 w-72 max-w-[85vw] shadow-2xl"
+            : "-translate-x-full md:translate-x-0"
+        } ${
+          /* Desktop Widths */
+          isCollapsed ? "md:w-20" : "md:w-64"
         }`}
       >
         {/* Top Header & Brand */}
         <div className="flex flex-col flex-1 overflow-y-auto custom-scrollbar">
           <div className="h-16 flex items-center justify-between px-4 border-b border-[#EAEBE8] shrink-0 sticky top-0 bg-[#FAFAF8]/95 backdrop-blur-md z-10">
-            {!collapsed && <Logo href="/" size="sm" />}
-
-            {collapsed && (
-              <div className="mx-auto">
+            {/* Logo */}
+            <div className="flex items-center gap-2">
+              {(!isCollapsed || isMobileNavOpen) ? (
                 <Logo href="/" size="sm" />
-              </div>
-            )}
+              ) : (
+                <div className="mx-auto">
+                  <Logo href="/" size="sm" />
+                </div>
+              )}
+            </div>
 
+            {/* Desktop Collapse Toggle */}
             <button
-              onClick={() => setCollapsed(!collapsed)}
-              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/50 transition"
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleCollapsed}
+              className="hidden md:flex text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/50 transition"
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+
+            {/* Mobile Close Button */}
+            <button
+              onClick={closeMobileNav}
+              className="md:hidden text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/50 transition"
+              title="Close navigation"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
 
@@ -95,7 +128,7 @@ export function Sidebar() {
           <div className="p-3 space-y-4">
             {sections.map((sec) => (
               <div key={sec.title} className="space-y-1">
-                {!collapsed && (
+                {(!isCollapsed || isMobileNavOpen) && (
                   <div className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-400">
                     {sec.title}
                   </div>
@@ -111,6 +144,7 @@ export function Sidebar() {
                     <Link
                       key={item.label}
                       href={item.href}
+                      onClick={closeMobileNav}
                       className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
                         isActive
                           ? "bg-emerald-50 text-emerald-900 border border-emerald-200/80 shadow-xs"
@@ -122,11 +156,11 @@ export function Sidebar() {
                           isActive ? "text-emerald-700 stroke-[2.2]" : "text-slate-400 group-hover:text-slate-600"
                         }`}
                       />
-                      {!collapsed && (
-                        <span className="flex-1 flex items-center justify-between">
+                      {(!isCollapsed || isMobileNavOpen) && (
+                        <span className="flex-1 flex items-center justify-between min-w-0">
                           <span className="truncate">{item.label}</span>
                           {item.badge && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100/70 text-emerald-800 border border-emerald-200">
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100/70 text-emerald-800 border border-emerald-200 shrink-0 ml-1">
                               {item.badge}
                             </span>
                           )}
@@ -140,39 +174,18 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Bottom Section: Quick Test & Public Link */}
-        <div className="p-3 border-t border-[#EAEBE8] space-y-2 shrink-0 bg-[#FAFAF8]">
-          {/* Test Agent in Browser Button */}
+        {/* Bottom Section: Quick Test */}
+        <div className="p-3 border-t border-[#EAEBE8] shrink-0 bg-[#FAFAF8]">
           <button
-            onClick={() => setIsTestModalOpen(true)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-900 bg-emerald-100/60 hover:bg-emerald-100 border border-emerald-200/80 transition-all text-left group"
+            onClick={() => {
+              closeMobileNav();
+              setIsTestModalOpen(true);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-emerald-900 bg-emerald-100/60 hover:bg-emerald-100 border border-emerald-200/80 transition-all text-left group"
           >
             <Radio className="w-3.5 h-3.5 text-emerald-700 animate-pulse shrink-0" />
-            {!collapsed && <span className="truncate">Test Agent in Browser</span>}
+            {(!isCollapsed || isMobileNavOpen) && <span className="truncate">Test Agent in Browser</span>}
           </button>
-
-          {/* Carrier & Cloned Voice Pill */}
-          {!collapsed && (
-            <div className="px-3 py-1.5 rounded-xl bg-white border border-[#EAEBE8] text-[10px] flex items-center justify-between text-slate-500">
-              <span className="flex items-center gap-1 font-semibold text-slate-700 truncate">
-                <Sparkles className="w-3 h-3 text-emerald-600" />
-                Cartesia AD Cloned
-              </span>
-              <span className="flex items-center gap-1 text-emerald-700 font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                +91 DID Live
-              </span>
-            </div>
-          )}
-
-          {/* Public Home Link */}
-          <Link
-            href="/"
-            className="flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-slate-500 hover:text-emerald-800 transition"
-          >
-            {!collapsed && <span>View Marketing Page</span>}
-            <ExternalLink className="w-3 h-3" />
-          </Link>
         </div>
       </aside>
 

@@ -69,7 +69,7 @@ export default function DashboardPage() {
         onOpenRealPhoneCall={() => setIsRealCallOpen(true)}
       />
 
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl w-full mx-auto space-y-8">
+      <div className="p-4 sm:p-6 md:p-8 lg:p-10 max-w-7xl w-full mx-auto space-y-6 sm:space-y-8">
         {/* ─── 1. Top 4 Metric Cards (Clean, Spacious Reference Style) ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {/* Metric 1 */}
@@ -78,16 +78,16 @@ export default function DashboardPage() {
               <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
                 Active Agents
               </span>
-              <div className="w-8 h-8 rounded-full bg-emerald-100/80 text-emerald-800 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700">
                 <Bot className="w-4 h-4" />
               </div>
             </div>
             <p className="font-heading text-3xl font-extrabold text-slate-900 tracking-tight">
               {agents.filter((a) => a.status === "ACTIVE").length}
             </p>
-            <div className="flex items-center gap-1.5 text-xs text-emerald-700 mt-2 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Cartesia Sonic-3.6 Active</span>
+            <div className="flex items-center gap-1 text-xs text-emerald-700 mt-2 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Ready for Inbound/Outbound</span>
             </div>
           </div>
 
@@ -95,18 +95,18 @@ export default function DashboardPage() {
           <div className="ref-card p-6">
             <div className="flex items-center justify-between text-slate-500 mb-3">
               <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
-                Total Handled Calls
+                Total Telephony Calls
               </span>
-              <div className="w-8 h-8 rounded-full bg-emerald-100/80 text-emerald-800 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700">
                 <PhoneCall className="w-4 h-4" />
               </div>
             </div>
             <p className="font-heading text-3xl font-extrabold text-slate-900 tracking-tight">
               {totalCalls}
             </p>
-            <div className="flex items-center gap-1 text-xs text-slate-500 mt-2 font-medium">
-              <span className="font-semibold text-emerald-700">99.4%</span>
-              <span>Connection reliability</span>
+            <div className="flex items-center gap-1 text-xs text-emerald-700 mt-2 font-semibold">
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              <span>+14% from last week</span>
             </div>
           </div>
 
@@ -114,17 +114,18 @@ export default function DashboardPage() {
           <div className="ref-card p-6">
             <div className="flex items-center justify-between text-slate-500 mb-3">
               <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
-                Spoken Minutes
+                Minutes Processed
               </span>
-              <div className="w-8 h-8 rounded-full bg-emerald-100/80 text-emerald-800 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700">
                 <Clock className="w-4 h-4" />
               </div>
             </div>
             <p className="font-heading text-3xl font-extrabold text-slate-900 tracking-tight">
-              {Number(totalMinutes).toFixed(1)}m
+              {totalMinutes}m
             </p>
-            <div className="flex items-center gap-1 text-xs text-slate-500 mt-2 font-medium">
-              <span>Avg 1.8 min / conversational call</span>
+            <div className="flex items-center gap-1 text-xs text-emerald-700 mt-2 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Ultra-low Latency Pipeline</span>
             </div>
           </div>
 
@@ -132,9 +133,9 @@ export default function DashboardPage() {
           <div className="ref-card p-6">
             <div className="flex items-center justify-between text-slate-500 mb-3">
               <span className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
-                Speech Latency
+                Avg Response Latency
               </span>
-              <div className="w-8 h-8 rounded-full bg-emerald-100/80 text-emerald-800 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700">
                 <Zap className="w-4 h-4" />
               </div>
             </div>
@@ -150,14 +151,14 @@ export default function DashboardPage() {
 
         {/* ─── 2. Active Agent Spotlight & Quick Launch Bar ─── */}
         {activeAgent && (
-          <div className="ref-card p-6 sm:p-8 bg-gradient-to-r from-white via-white to-emerald-50/40">
+          <div className="ref-card p-4 sm:p-6 lg:p-8 bg-gradient-to-r from-white via-white to-emerald-50/40">
             <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-100/80 border border-emerald-200 flex items-center justify-center text-emerald-800 shrink-0">
                   <Bot className="w-7 h-7" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <h3 className="font-heading text-xl font-bold text-slate-900">
                       {activeAgent.name}
                     </h3>

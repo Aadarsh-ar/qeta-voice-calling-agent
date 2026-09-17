@@ -6,7 +6,7 @@ export function HeroValueStrip() {
     {
       icon: Zap,
       label: "REALTIME VOICE",
-      sublabel: "<150ms instant streaming",
+      sublabel: "Instant conversational streaming",
     },
     {
       icon: Globe,
@@ -21,7 +21,7 @@ export function HeroValueStrip() {
     {
       icon: ShieldCheck,
       label: "BUILT FOR BUSINESS",
-      sublabel: "PSTN Telephony & CRM Tools",
+      sublabel: "Enterprise Telephony & CRM Tools",
     },
   ];
 

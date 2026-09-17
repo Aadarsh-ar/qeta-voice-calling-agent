@@ -140,9 +140,9 @@ export default function InstantLeadsPage() {
         subtitle="Trigger sub-15 second AI voice qualification calls to newly captured inbound leads"
       />
 
-      <div className="p-6 md:p-8 max-w-6xl w-full mx-auto space-y-8">
+      <div className="p-4 sm:p-6 md:p-8 max-w-6xl w-full mx-auto space-y-6 sm:space-y-8">
         {/* Top Highlight Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
             <div className="flex items-center justify-between text-slate-500 mb-2">
               <span className="text-[11px] font-bold uppercase tracking-wider">Avg Speed to Call</span>

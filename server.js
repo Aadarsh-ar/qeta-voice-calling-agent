@@ -90,6 +90,9 @@ const livePipelineStatus = {
   lastActive: new Date().toISOString(),
 };
 
+// Real-time call states for truthful UI reporting (Sections 2, 4, 18, 19)
+const activeCallStates = new Map();
+
 // ─── TTS: Cartesia Sonic ────────────────────────────────────────────────────
 async function synthesizeSpeech(text, voiceId) {
   const apiKey = process.env.CARTESIA_API_KEY || "";
@@ -376,7 +379,17 @@ function getFallbackResponse(userText) {
 }
 
 // ─── Agent data loader & Instant Pre-warmed Greeting Cache ─────────────────────
+let prismaClientInstance = null;
+async function getPrismaClient() {
+  if (!prismaClientInstance) {
+    const { PrismaClient } = await import("@prisma/client");
+    prismaClientInstance = new PrismaClient();
+  }
+  return prismaClientInstance;
+}
+
 const agentGreetingCache = new Map();
+const agentMetaCache = new Map();
 
 async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
   const cacheKey = agentId || "default";
@@ -386,15 +399,15 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
   }
 
   // Load essential agent identity directly without multi-hop HTTP
-  let agentName = "Aadarsh";
-  let businessName = "ABC Electronics";
+  let agentName = "Voice Agent";
+  let businessName = "";
   let voiceId = process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
   let language = "TELUGU_ENGLISH";
   let systemPrompt = "";
+  let initialMessage = "";
 
   try {
-    const { PrismaClient } = await import("@prisma/client");
-    const prisma = new PrismaClient();
+    const prisma = await getPrismaClient();
     let dbAgent = null;
     if (agentId && agentId !== "default") {
       dbAgent = await prisma.agent.findUnique({
@@ -402,6 +415,7 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
         select: {
           name: true,
           instructions: true,
+          initialMessage: true,
           systemPrompt: true,
           cartesiaVoiceId: true,
           language: true,
@@ -416,6 +430,7 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
         select: {
           name: true,
           instructions: true,
+          initialMessage: true,
           systemPrompt: true,
           cartesiaVoiceId: true,
           language: true,
@@ -426,6 +441,7 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
         select: {
           name: true,
           instructions: true,
+          initialMessage: true,
           systemPrompt: true,
           cartesiaVoiceId: true,
           language: true,
@@ -439,21 +455,29 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
       voiceId = dbAgent.cartesiaVoiceId || voiceId;
       language = dbAgent.language || language;
       systemPrompt = dbAgent.instructions || dbAgent.systemPrompt || "";
+      initialMessage = dbAgent.initialMessage || "";
       if (dbAgent.business?.name) businessName = dbAgent.business.name;
     }
-    await prisma.$disconnect();
   } catch (dbErr) {
     console.warn("[GREETING_PREWARM_DB_WARN]", dbErr.message);
   }
 
-  // Train well starter welcome greeting based on language
+  // Use agent's exact initialMessage if configured, or generate language-appropriate greeting
   let greeting;
-  if (language === "ENGLISH") {
-    greeting = `Hello! I am ${agentName} calling from ${businessName}. How may I help you today?`;
+  if (initialMessage && initialMessage.trim().length > 0) {
+    greeting = initialMessage.trim();
+  } else if (language === "ENGLISH") {
+    greeting = businessName 
+      ? `Hello! I am ${agentName} calling from ${businessName}. How may I help you today?`
+      : `Hello! I am ${agentName}. How may I help you today?`;
   } else if (language === "TELUGU") {
-    greeting = `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను, ${businessName} నుండి కాల్ చేస్తున్నాను. మీకు ఎలా సహాయపడగలను?`;
+    greeting = businessName
+      ? `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను, ${businessName} నుండి కాల్ చేస్తున్నాను. మీకు ఎలా సహాయపడగలను?`
+      : `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను. మీకు ఎలా సహాయపడగలను?`;
   } else {
-    greeting = `హలో అండి! నేను ${agentName} మాట్లాడుతున్నాను, ${businessName} నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?`;
+    greeting = businessName
+      ? `హలో అండి! నేను ${agentName} మాట్లాడుతున్నాను, ${businessName} నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?`
+      : `హలో అండి! నేను ${agentName} మాట్లాడుతున్నాను. మీకు ఎలా సహాయం చేయగలను?`;
   }
 
   // Pre-synthesize with Cartesia Sonic TTS for 0ms call pickup delivery
@@ -465,19 +489,18 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
 
 function getActiveAgent() {
   return {
-    name: "Aadarsh",
+    name: "Voice Assistant",
     voiceId: process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
     systemPrompt: `# IDENTITY & ROLE
-You are ఆదర్శ్ (Adarsh), a professional and friendly AI voice assistant representing Vaani Enterprises.
-You are on a LIVE, REAL-TIME PHONE CALL with an Indian customer.
+You are a professional and friendly AI voice assistant.
+You are on a LIVE, REAL-TIME PHONE CALL with a customer.
 
 # RULES
 1. Keep response between 1 to 2 sentences. Maximum 20 words.
 2. Speak in natural everyday Telugu / Tenglish.
 3. Polite words: "అవునండి", "ఖచ్చితంగా అండి", "ధన్యవాదాలు అండి".
 4. Ask only ONE question at a time.
-5. Opening greeting: "హాయ్ అండి, నేను ఆదర్శ్. మీకు ఎలా సహాయం చేయగలను?"
-6. Business: Vaani Enterprises - Telugu AI Voice Calling Platform (Starter ₹15,000/mo, Hyderabad).`,
+5. Opening greeting: "హాయ్ అండి, నేను మీ వాయిస్ అసిస్టెంట్. మీకు ఎలా సహాయం చేయగలను?"`,
   };
 }
 
@@ -579,86 +602,121 @@ function sendAudioToVobiz(ws, streamId, rawAudioBuf) {
 // Vobiz sends:  mulaw/8kHz audio → we forward as base64 audio_input events
 // Cartesia sends: audio_output events → we decode and forward to Vobiz as playAudio
 // ──────────────────────────────────────────────────────────────────────────────
-async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
+async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, callUuid = "unknown", agentName = "Voice Agent") {
   const apiKey = process.env.CARTESIA_API_KEY || "";
   if (!apiKey) {
     console.error("[CARTESIA_AGENT] No API key — cannot connect to Cartesia agent");
     return null;
   }
 
-  // 1. Obtain a short-lived access token (never expose raw key over WS)
-  let accessToken = null;
-  try {
-    const tokenRes = await fetchWithRetry(
-      "https://api.cartesia.ai/access-token",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "X-API-Key": apiKey,
-          "Cartesia-Version": "2026-08-14",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          grants: { "websocket:connect": { agent_id: cartesiaAgentId } },
-          expires_in: 3600,
-        }),
-      },
-      { timeoutMs: 8000, maxRetries: 2 }
-    );
-    if (tokenRes.ok) {
-      const td = await tokenRes.json();
-      accessToken = td.access_token || td.token;
-    } else {
-      console.warn("[CARTESIA_AGENT] Token fetch failed:", tokenRes.status);
-    }
-  } catch (err) {
-    console.warn("[CARTESIA_AGENT] Token exception:", err.message);
-  }
-
-  if (!accessToken) {
-    console.error("[CARTESIA_AGENT] Could not obtain access token — falling back to standard pipeline");
-    return null;
-  }
-
-  // 2. Connect to Cartesia Agent WebSocket (Official Ultra-Low Latency Agent Stream Protocol)
+  // Connect to Cartesia Agent WebSocket natively with API key
   const { WebSocket: NodeWS } = await import("ws");
-  const cartesiaWsUrl = `wss://api.cartesia.ai/agents/stream/${cartesiaAgentId}?cartesia_version=2026-08-14`;
+  const cartesiaWsUrl = `wss://api.cartesia.ai/agents/stream/${cartesiaAgentId}?cartesia_version=2026-08-14&api_key=${encodeURIComponent(apiKey)}`;
   const cartesiaWs = new NodeWS(cartesiaWsUrl, {
     headers: {
-      "X-API-Key": apiKey,
-      Authorization: `Bearer ${accessToken || apiKey}`,
       "Cartesia-Version": "2026-08-14",
     },
   });
 
   let cartesiaReady = false;
   let pendingAudioQueue = []; // Buffer inbound audio until session is ready
+  const streamStartTime = Date.now();
 
-  cartesiaWs.on("open", () => {
-    console.log(`[CARTESIA_AGENT] Connected to Cartesia Agent Stream: ${cartesiaAgentId}`);
+  // Section 9: Structured Frame & Media Telemetry Counters
+  let framesSent = 0;
+  let bytesSent = 0;
+  let framesReceived = 0;
+  let bytesReceived = 0;
+  let firstAudioSentTs = null;
+  let lastAudioSentTs = null;
+  let firstAudioReceivedTs = null;
+  let lastAudioReceivedTs = null;
 
-    // 3. Send official 'start' event — mulaw_8000 telephony input and speaking_pace streaming
-    cartesiaWs.send(
-      JSON.stringify({
-        event: "start",
-        stream_id: streamId,
-        config: {
-          input_format: "mulaw_8000",
-          output_audio_delivery: "speaking_pace",
-        },
-      })
-    );
+  // Acoustic echo prevention: track when agent is actively sending audio to phone
+  let isAgentOutputtingAudio = false;
+  let agentAudioEndTimer = null;
+
+  // Track in activeCallStates
+  activeCallStates.set(streamId, {
+    streamId,
+    callUuid,
+    cartesiaAgentId,
+    agentName,
+    stage: "CARTESIA_CONNECTING",
+    mediaConnected: true,
+    cartesiaConnected: false,
+    greetingStarted: false,
+    greetingCompleted: false,
+    audioFramesSent: 0,
+    bytesSent: 0,
+    audioFramesReceived: 0,
+    bytesReceived: 0,
+    active: true,
+    startedAt: new Date().toISOString(),
   });
+
+  const isConnected = await new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.warn(`[CARTESIA_AGENT] Connect timeout after 2500ms for agent ${cartesiaAgentId}`);
+      resolve(false);
+    }, 2500);
+
+    cartesiaWs.on("open", () => {
+      clearTimeout(timeout);
+      const connDuration = Date.now() - streamStartTime;
+      console.log(`[LATENCY_TRACE] CARTESIA_CONNECTED → Handshake complete for ${cartesiaAgentId} in ${connDuration}ms`);
+      const state = activeCallStates.get(streamId);
+      if (state) {
+        state.cartesiaConnected = true;
+        state.stage = "CARTESIA_CONNECTED";
+      }
+
+      try {
+        console.log(`[LATENCY_TRACE] GREETING_STARTED → Cartesia start event dispatched (format: mulaw_8000, speaking_pace)`);
+        cartesiaWs.send(
+          JSON.stringify({
+            event: "start",
+            stream_id: streamId,
+            config: {
+              input_format: "mulaw_8000",
+              output_audio_delivery: "speaking_pace",
+            },
+          })
+        );
+        cartesiaReady = true;
+        if (state) state.stage = "GREETING_GENERATING";
+      } catch (e) {
+        console.warn("[CARTESIA_AGENT] Failed sending start:", e.message);
+      }
+      resolve(true);
+    });
+
+    cartesiaWs.on("error", (err) => {
+      clearTimeout(timeout);
+      console.error("[CARTESIA_AGENT] WebSocket error during connect:", err.message);
+      resolve(false);
+    });
+  });
+
+  if (!isConnected) {
+    try { cartesiaWs.close(); } catch {}
+    const state = activeCallStates.get(streamId);
+    if (state) {
+      state.stage = "FAILED";
+      state.active = false;
+      state.error = "Cartesia WebSocket connection timeout";
+    }
+    return null;
+  }
 
   cartesiaWs.on("message", (rawMsg) => {
     try {
       const msg = JSON.parse(rawMsg.toString());
 
-      // Stream Acknowledged & Session Ready
-      if (msg.event === "ack" || msg.type === "session_ready") {
+      // Track session readiness and flush pending caller audio
+      if (!cartesiaReady && (msg.event === "ack" || msg.type === "session_ready" || msg.event === "media_output" || msg.event === "turn_started")) {
         cartesiaReady = true;
-        console.log(`[CARTESIA_AGENT] Session ready & acknowledged (Stream: ${msg.stream_id || streamId}) — flushing queued audio`);
+        console.log(`[CARTESIA_AGENT] Session acknowledged (event=${msg.event || msg.type}) — ready for conversation`);
         while (pendingAudioQueue.length > 0) {
           const chunk = pendingAudioQueue.shift();
           cartesiaWs.send(
@@ -672,9 +730,39 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
       }
 
       // Voice Audio Stream Output (Immediate Welcome Speech + AI Turns)
-      else if (msg.event === "media_output" || msg.type === "audio_output") {
+      if (msg.event === "media_output" || msg.type === "audio_output") {
         const payload = msg.media?.payload || msg.audio || msg.data;
         if (!payload) return;
+
+        framesSent++;
+        const chunkBytes = Buffer.from(payload, "base64").length;
+        bytesSent += chunkBytes;
+        if (!firstAudioSentTs) {
+          firstAudioSentTs = new Date().toISOString();
+          console.log(`[LATENCY_TRACE] FIRST_AUDIO_SENT → Audio forwarding to telephony in ${Date.now() - streamStartTime}ms (${chunkBytes} bytes)`);
+          const state = activeCallStates.get(streamId);
+          if (state) {
+            state.stage = "GREETING_PLAYING";
+            state.greetingStarted = true;
+            state.firstAudioTimestamp = firstAudioSentTs;
+          }
+        }
+        lastAudioSentTs = new Date().toISOString();
+        isAgentOutputtingAudio = true;
+        if (agentAudioEndTimer) clearTimeout(agentAudioEndTimer);
+        // Guard window: keep echo suppression active for 400ms after last audio frame
+        agentAudioEndTimer = setTimeout(() => {
+          isAgentOutputtingAudio = false;
+        }, 400);
+
+        const state = activeCallStates.get(streamId);
+        if (state) {
+          state.stage = "AGENT_SPEAKING";
+          state.audioFramesSent = framesSent;
+          state.bytesSent = bytesSent;
+          state.lastAudioTimestamp = lastAudioSentTs;
+        }
+
         if (vobizWs.readyState === 1) {
           vobizWs.send(
             JSON.stringify({
@@ -687,23 +775,39 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
               },
             })
           );
+          if (framesSent === 1 || framesSent === 5 || framesSent % 25 === 0) {
+            console.log(`[CARTESIA_AUDIO_DELIVERED] frame #${framesSent}, chunk=${chunkBytes}B, totalSent=${bytesSent}B`);
+          }
         }
       }
 
       // Streaming Text Transcript
       else if (msg.event === "turn_output_text_delta" || msg.type === "turn_output_text_delta") {
         const text = msg.turn_output_text_delta?.text || msg.text;
-        if (text) process.stdout.write(`[AI_SPOKE] ${text}\n`);
+        if (text) {
+          process.stdout.write(`[AI_SPOKE] ${text}\n`);
+          const state = activeCallStates.get(streamId);
+          if (state) {
+            state.lastTranscript = (state.lastTranscript || "") + text;
+          }
+        }
       }
 
-      // Instant Zero-Latency Barge-In Interruption
-      else if (msg.event === "audio_output_clear" || msg.type === "audio_output_clear") {
-        console.log("[CARTESIA_AGENT] Barge-in detected — flushing telephony buffer immediately");
-        try {
-          if (vobizWs.readyState === 1) {
-            vobizWs.send(JSON.stringify({ event: "clearAudio", streamId }));
-          }
-        } catch {}
+      // Instant Zero-Latency Barge-In Interruption (Guarded: ignore initial line clicks < 1.8s)
+      else if (msg.event === "audio_output_clear" || msg.type === "audio_output_clear" || msg.event === "interruption" || msg.type === "interruption" || msg.event === "turn_interrupted") {
+        const elapsedSinceStart = Date.now() - streamStartTime;
+        if (elapsedSinceStart > 1800) {
+          console.log("[CARTESIA_AGENT] Barge-in detected — clearing telephony playback buffer immediately");
+          try {
+            if (vobizWs.readyState === 1) {
+              vobizWs.send(JSON.stringify({ event: "clearAudio", streamId }));
+            }
+          } catch {}
+          const state = activeCallStates.get(streamId);
+          if (state) state.stage = "LISTENING";
+        } else {
+          console.log(`[CARTESIA_AGENT] Guarded early audio_output_clear (${elapsedSinceStart}ms) to preserve greeting`);
+        }
       }
 
       // System / Custom Tool Calls
@@ -711,7 +815,7 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
         console.log("[CARTESIA_AGENT] Tool call:", JSON.stringify(msg));
         const toolName = msg.name || msg.function?.name || msg.tool_call?.name;
         if (toolName === "end_call") {
-          console.log("[CARTESIA_AGENT] End call tool triggered — hanging up");
+          console.log("[CARTESIA_AGENT] End call tool triggered — hanging up cleanly");
           setTimeout(() => {
             try { vobizWs.close(1000, "Cartesia agent ended call"); } catch {}
             try { cartesiaWs.close(1000, "End call"); } catch {}
@@ -720,10 +824,9 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
       }
 
       else if (msg.event === "error" || msg.type === "error") {
-        console.error("[CARTESIA_AGENT] Error from Cartesia:", msg.message || JSON.stringify(msg));
+        console.error("[CARTESIA_AGENT] Error event from Cartesia:", msg.message || JSON.stringify(msg));
       }
     } catch (parseErr) {
-      // Binary audio frame? Handle raw
       if (Buffer.isBuffer(rawMsg) && vobizWs.readyState === 1) {
         sendAudioToVobizRaw(vobizWs, streamId, rawMsg);
       }
@@ -731,12 +834,20 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
   });
 
   cartesiaWs.on("error", (err) => {
-    console.error("[CARTESIA_AGENT] WebSocket error:", err.message);
+    console.error("[CARTESIA_AGENT] WebSocket connection error:", err.message);
   });
 
   cartesiaWs.on("close", (code, reason) => {
-    console.log(`[CARTESIA_AGENT] Disconnected: code=${code}, reason=${reason?.toString()}`);
+    const rStr = reason?.toString() || "";
+    console.log(`[CARTESIA_AGENT] Session closed: code=${code}, reason=${rStr}`);
+    console.log(`[MEDIA_FORMAT_SUMMARY] Telemetry: framesSent=${framesSent} (${bytesSent}B), framesRecv=${framesReceived} (${bytesReceived}B), firstSent=${firstAudioSentTs || "none"}`);
     cartesiaReady = false;
+    const state = activeCallStates.get(streamId);
+    if (state) {
+      state.cartesiaConnected = false;
+      state.stage = "ENDED";
+      state.active = false;
+    }
   });
 
   // Keepalive ping to Cartesia WS every 30s
@@ -745,10 +856,34 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
     else clearInterval(cartesiaPing);
   }, 30000);
 
-  // Return a handler function — call this with each incoming Vobiz audio chunk
+  // Return a handler function — called with each incoming Vobiz audio chunk
   return {
     sendAudio: (mulawChunk) => {
+      framesReceived++;
+      bytesReceived += mulawChunk.length;
+      if (!firstAudioReceivedTs) {
+        firstAudioReceivedTs = new Date().toISOString();
+      }
+      lastAudioReceivedTs = new Date().toISOString();
+
+      const state = activeCallStates.get(streamId);
+      if (state) {
+        state.audioFramesReceived = framesReceived;
+        state.bytesReceived = bytesReceived;
+      }
+
       if (cartesiaWs.readyState !== 1) return;
+
+      // Acoustic echo suppression: prevent speakerphone and line echo of the agent's own
+      // voice from being piped back to Cartesia, which would cause recursive self-listening!
+      if (isAgentOutputtingAudio) {
+        const rms = calculateRms(mulawChunk);
+        if (rms < 1100) {
+          return; // Drop echo
+        }
+        console.log(`[CARTESIA_ECHO_GUARD] Genuine caller speech detected during AI playback (rms=${Math.round(rms)})`);
+      }
+
       if (!cartesiaReady) {
         pendingAudioQueue.push(mulawChunk);
         return;
@@ -767,9 +902,18 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId) {
     },
     close: () => {
       clearInterval(cartesiaPing);
+      if (agentAudioEndTimer) clearTimeout(agentAudioEndTimer);
       try { cartesiaWs.close(1000, "Call ended"); } catch {}
     },
     isReady: () => cartesiaReady && cartesiaWs.readyState === 1,
+    getStats: () => ({
+      framesSent,
+      bytesSent,
+      framesReceived,
+      bytesReceived,
+      firstAudioSentTs,
+      lastAudioSentTs,
+    }),
   };
 }
 
@@ -822,14 +966,30 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
   let cartesiaAgentBridge = null; // Set after stream start if agent has cartesiaAgentId
   let useCartesiaNative = false;  // True when Cartesia bridge is active
 
-  // Exact runtime agent selection — Section 4 & Section 5
+  // Exact runtime agent selection — Section 4 & Section 5 & Section 7
   async function resolveExactAgent() {
     if (queryAgentId && queryAgentId.trim()) {
+      const targetId = queryAgentId.trim();
+
+      // 1. Check in-memory agent cache if fresh (< 30s)
+      if (agentMetaCache.has(targetId)) {
+        const cached = agentMetaCache.get(targetId);
+        if (Date.now() - (cached._cachedAt || 0) < 30000) {
+          console.log(`[AGENT_CACHE_HIT] Instant agent resolution for "${cached.name}" (${cached.id}) in 0ms`);
+          return cached;
+        }
+      }
+
+      // 2. Query Neon PostgreSQL for this exact agent by id OR cartesiaAgentId
       try {
-        const { PrismaClient } = await import("@prisma/client");
-        const prisma = new PrismaClient();
-        const dbAgent = await prisma.agent.findUnique({
-          where: { id: queryAgentId.trim() },
+        const prisma = await getPrismaClient();
+        const dbAgent = await prisma.agent.findFirst({
+          where: {
+            OR: [
+              { id: targetId },
+              { cartesiaAgentId: targetId },
+            ],
+          },
           select: {
             id: true,
             name: true,
@@ -841,15 +1001,50 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
             business: { select: { name: true } },
           },
         });
-        await prisma.$disconnect();
-        if (dbAgent) return dbAgent;
-      } catch {}
+
+        if (dbAgent) {
+          const resolved = {
+            ...dbAgent,
+            instructions: dbAgent.instructions || dbAgent.systemPrompt || "",
+            systemPrompt: dbAgent.instructions || dbAgent.systemPrompt || "",
+            cartesiaAgentId: dbAgent.cartesiaAgentId || (targetId.startsWith("agent_") ? targetId : undefined),
+            _cachedAt: Date.now(),
+          };
+          agentMetaCache.set(targetId, resolved);
+          if (resolved.cartesiaAgentId) {
+            agentMetaCache.set(resolved.cartesiaAgentId, resolved);
+          }
+          console.log(`[AGENT_RESOLVED] Exact agent resolved: "${resolved.name}" (${resolved.id}), CartesiaAgentId: ${resolved.cartesiaAgentId || "none"}`);
+          return resolved;
+        } else if (targetId.startsWith("agent_")) {
+          // Direct native Cartesia agent ID passed directly
+          const directAgent = {
+            id: targetId,
+            name: "Cartesia Conversational Agent",
+            instructions: "",
+            systemPrompt: "",
+            cartesiaAgentId: targetId,
+            cartesiaVoiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+            language: "TELUGU",
+            business: { name: "Direct" },
+            _cachedAt: Date.now(),
+          };
+          agentMetaCache.set(targetId, directAgent);
+          return directAgent;
+        }
+      } catch (err) {
+        console.warn("[AGENT_LOOKUP_ERR]", err.message);
+      }
+
+      // If an agentId was specified, NEVER fall back to another agent!
+      console.warn(`[AGENT_NOT_FOUND] Exact agent "${targetId}" not found. No cross-agent fallback allowed.`);
+      return null;
     }
+
     if (queryCallerNumber) {
       try {
         const clean = queryCallerNumber.replace(/[\s\-\(\)]/g, "");
-        const { PrismaClient } = await import("@prisma/client");
-        const prisma = new PrismaClient();
+        const prisma = await getPrismaClient();
         const phone = await prisma.phoneNumber.findFirst({
           where: { e164Number: clean },
           select: {
@@ -867,8 +1062,10 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
             },
           },
         });
-        await prisma.$disconnect();
-        if (phone?.assignedAgent) return phone.assignedAgent;
+        if (phone?.assignedAgent) {
+          agentMetaCache.set(clean, phone.assignedAgent);
+          return phone.assignedAgent;
+        }
       } catch {}
     }
     return null;
@@ -1013,8 +1210,8 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
 
       if (event === "start") {
         const tStart = Date.now();
-        streamId = msg.start?.streamId || msg.streamId || `sid_${Date.now()}`;
-        callUuid = msg.start?.callUuid || msg.start?.callId || msg.start?.callSid || "unknown";
+        streamId = msg.start?.streamId || msg.start?.stream_id || msg.streamId || msg.stream_id || `sid_${Date.now()}`;
+        callUuid = msg.start?.callUuid || msg.start?.call_uuid || msg.start?.callId || msg.start?.call_id || msg.start?.callSid || msg.callUuid || "unknown";
         console.log(`[LATENCY_TRACE] CALL_STARTED → streamId=${streamId}, callUuid=${callUuid}`);
 
         // Immediate RTP Carrier Readiness — NO ARTIFICIAL 800ms DELAY!
@@ -1035,12 +1232,12 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
 
         if (cartesiaAgentId) {
           // ── CARTESIA NATIVE AGENT PATH (Lowest latency, full STT+LLM+TTS runtime) ──
-          console.log(`[CARTESIA_AGENT] Connecting to Cartesia Agent WebSocket: ${cartesiaAgentId}`);
-          cartesiaAgentBridge = await handleCartesiaAgentStream(ws, cartesiaAgentId, streamId);
+          console.log(`[LATENCY_TRACE] CARTESIA_CONNECTING → Connecting to Cartesia Agent WebSocket: ${cartesiaAgentId}`);
+          cartesiaAgentBridge = await handleCartesiaAgentStream(ws, cartesiaAgentId, streamId, callUuid, agentName);
           if (cartesiaAgentBridge) {
             useCartesiaNative = true;
             greetingSent = true;
-            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Cartesia Native Agent active, delivering trained initial_message`);
+            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Cartesia Native Agent active, streaming trained greeting`);
           } else {
             console.warn(`[CARTESIA_AGENT] Bridge failed or credits exhausted — auto-routing to low-latency TTS pipeline`);
           }
@@ -1160,10 +1357,16 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
         }
 
       } else if (event === "playedStream") {
+        console.log(`[LATENCY_TRACE] FIRST_AUDIO_DELIVERED → Customer heard agent audio playback on phone (name=${msg.name || "unknown"})`);
         console.log(`[CALLER_AUDIO_PLAYBACK_CONFIRMED] name=${msg.name || "unknown"}`);
         console.log(`[VOBIZ] Outbound audio playback finished (name=${msg.name || "unknown"})`);
         livePipelineStatus.callerPlayback = "Confirmed";
         setAiSpeaking(false);
+        const state = activeCallStates.get(streamId);
+        if (state) {
+          state.greetingCompleted = true;
+          state.stage = "LISTENING";
+        }
 
       } else if (event === "clearedAudio") {
         console.log(`[VOBIZ] Outbound audio buffer cleared`);
@@ -1179,7 +1382,7 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
 
   ws.on("close", (code, reason) => {
     const reasonStr = reason?.toString() || "";
-    console.log(`[CALL_ENDED] WebSocket closed: code=${code}, reason=${reasonStr}`);
+    console.log(`[LATENCY_TRACE] CALL_ENDED → WebSocket closed: code=${code}, reason=${reasonStr}`);
     if (speakingWatchdog) clearTimeout(speakingWatchdog);
     if (pingInterval) clearInterval(pingInterval);
     // Close Cartesia native bridge if active
@@ -1187,6 +1390,27 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
       cartesiaAgentBridge.close();
       cartesiaAgentBridge = null;
       console.log("[CARTESIA_AGENT] Bridge closed on call end");
+    }
+    // Update active call states
+    const state = activeCallStates.get(streamId);
+    if (state) {
+      state.stage = "ENDED";
+      state.active = false;
+      state.endedAt = new Date().toISOString();
+      state.durationSeconds = Math.round((Date.now() - callConnectTime) / 1000);
+    }
+    // Update Neon PostgreSQL if callUuid exists
+    if (callUuid && callUuid !== "unknown") {
+      getPrismaClient().then((prisma) => {
+        prisma.call.updateMany({
+          where: { vobizCallId: callUuid },
+          data: {
+            status: "COMPLETED",
+            endedAt: new Date(),
+            durationSeconds: Math.round((Date.now() - callConnectTime) / 1000),
+          },
+        }).catch(() => {});
+      }).catch(() => {});
     }
     // Drain any pending audio to avoid dangling references
     speechAudioChunks = [];
@@ -1238,10 +1462,49 @@ const server = createServer((req, res) => {
     return;
   }
   if (url === "/api/agent/cache-invalidate" || url.startsWith("/api/agent/cache-invalidate")) {
-    agentGreetingCache.clear();
-    console.log("[CACHE_INVALIDATED] Cleared pre-warmed agent greeting and training cache");
+    const parsed = new URL(url, `http://localhost:${port}`);
+    const targetAgentId = parsed.searchParams.get("agentId");
+    if (targetAgentId) {
+      const cleanId = targetAgentId.trim();
+      agentGreetingCache.delete(cleanId);
+      agentMetaCache.delete(cleanId);
+      for (const [key, val] of agentMetaCache.entries()) {
+        if (val.id === cleanId || val.cartesiaAgentId === cleanId) {
+          agentMetaCache.delete(key);
+        }
+      }
+      for (const [key] of agentGreetingCache.entries()) {
+        if (key === cleanId) {
+          agentGreetingCache.delete(key);
+        }
+      }
+      console.log(`[CACHE_INVALIDATED] Cleared cache specifically for agent: ${cleanId}`);
+    } else {
+      agentGreetingCache.clear();
+      agentMetaCache.clear();
+      console.log("[CACHE_INVALIDATED] Cleared all pre-warmed agent greeting and metadata cache");
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ success: true, message: "Agent cache cleared" }));
+    return;
+  }
+  if (url === "/api/calls/live-status" || url.startsWith("/api/calls/live-status")) {
+    const parsed = new URL(url, `http://localhost:${port}`);
+    const id = parsed.searchParams.get("id");
+    let match = null;
+    if (id) {
+      for (const [sid, s] of activeCallStates.entries()) {
+        if (s.callUuid === id || sid === id || s.callId === id) {
+          match = s;
+          break;
+        }
+      }
+    }
+    if (!match && activeCallStates.size > 0) {
+      match = Array.from(activeCallStates.values()).pop();
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, state: match || { stage: "IDLE", active: false } }));
     return;
   }
   handle(req, res);

@@ -29,6 +29,11 @@ export async function GET(
           llmModel: true,
           language: true,
           status: true,
+          initialMessage: true,
+          cartesiaVersionId: true,
+          lastSyncedAt: true,
+          lastSyncStatus: true,
+          lastSyncError: true,
           createdAt: true,
           updatedAt: true,
           phoneNumber: { select: { e164Number: true } },
@@ -76,6 +81,10 @@ export async function GET(
           language: dbAgent.language as any,
           status: dbAgent.status as any,
           systemPrompt: dbAgent.instructions || dbAgent.systemPrompt,
+          initialMessage: dbAgent.initialMessage || undefined,
+          cartesiaVersionId: dbAgent.cartesiaVersionId || undefined,
+          lastSyncedAt: dbAgent.lastSyncedAt?.toISOString(),
+          lastSyncStatus: (dbAgent.lastSyncStatus as any) || "SYNCED",
           businessContext: dbAgent.businessContext || "",
           businessProfile: parsedBizProfile,
           cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
@@ -145,7 +154,8 @@ export async function PUT(
 
     const bizProfile = body.businessProfile || currentAgent?.businessProfile || {};
     const agentName = body.name || currentAgent?.name || "AD2 — Aadarsh";
-    const agentInstructions = body.systemPrompt || body.instructions || currentAgent?.systemPrompt || "";
+    const agentInstructions = (body.instructions || body.systemPrompt || currentAgent?.instructions || currentAgent?.systemPrompt || "").trim();
+    const initialMessage = body.initialMessage !== undefined ? body.initialMessage : currentAgent?.initialMessage;
     const voiceId = body.cartesiaVoiceId || currentAgent?.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
     const language = body.language || currentAgent?.language || "TELUGU_ENGLISH";
     const tools = body.tools || currentAgent?.tools || [];
@@ -157,6 +167,7 @@ export async function PUT(
         cartesiaAgentId,
         agentName,
         instructions: agentInstructions,
+        initialMessage,
         businessName: bizProfile.businessName,
         businessDescription: bizProfile.description,
         businessInformation: bizProfile.productsServices,
@@ -188,15 +199,17 @@ export async function PUT(
     try {
       const org = await prisma.organization.findFirst();
       if (org) {
-        // Upsert Business if provided
+        // Upsert Business specifically for this agent (never mutate other agents' businesses)
         let businessRecord = null;
         if (bizProfile.businessName) {
-          const existingBiz = await prisma.business.findFirst({
-            where: { organizationId: org.id },
+          const currentDbAgent = await prisma.agent.findUnique({
+            where: { id },
+            select: { businessId: true },
           });
-          if (existingBiz) {
+
+          if (currentDbAgent?.businessId) {
             businessRecord = await prisma.business.update({
-              where: { id: existingBiz.id },
+              where: { id: currentDbAgent.businessId },
               data: {
                 name: bizProfile.businessName,
                 description: bizProfile.description || "",
@@ -223,7 +236,7 @@ export async function PUT(
           }
         }
 
-        // Update Agent record
+        // Update Agent record with verified Cartesia sync metadata
         await prisma.agent.upsert({
           where: { id },
           create: {
@@ -233,23 +246,34 @@ export async function PUT(
             description: body.description || currentAgent?.description || "",
             instructions: agentInstructions,
             systemPrompt: syncResult.instructions,
+            initialMessage: syncResult.initialMessage,
             cartesiaAgentId: verifiedCartesiaAgentId,
             cartesiaVoiceId: voiceId,
             language: language as any,
             status: body.status || currentAgent?.status || "ACTIVE",
             businessId: businessRecord?.id,
             businessContext: JSON.stringify(bizProfile),
+            cartesiaVersionId: syncResult.cartesiaVersionId,
+            lastSyncedAt: new Date(),
+            lastSyncStatus: "SYNCED",
+            lastSyncError: null,
           },
           update: {
             name: agentName,
             description: body.description !== undefined ? body.description : undefined,
             instructions: agentInstructions,
             systemPrompt: syncResult.instructions,
+            initialMessage: syncResult.initialMessage,
             cartesiaAgentId: verifiedCartesiaAgentId,
             cartesiaVoiceId: voiceId,
+            language: language as any,
             status: body.status !== undefined ? body.status : undefined,
             businessId: businessRecord?.id,
             businessContext: JSON.stringify(bizProfile),
+            cartesiaVersionId: syncResult.cartesiaVersionId,
+            lastSyncedAt: new Date(),
+            lastSyncStatus: "SYNCED",
+            lastSyncError: null,
           },
         });
 
@@ -294,8 +318,12 @@ export async function PUT(
       ...body,
       name: agentName,
       systemPrompt: syncResult.instructions,
+      initialMessage: syncResult.initialMessage,
       cartesiaAgentId: verifiedCartesiaAgentId,
       cartesiaVoiceId: voiceId,
+      cartesiaVersionId: syncResult.cartesiaVersionId,
+      lastSyncedAt: new Date().toISOString(),
+      lastSyncStatus: "SYNCED",
       businessProfile: bizProfile,
       lastActive: "Active & Synchronized",
     });
@@ -314,6 +342,14 @@ export async function PUT(
       updatedAt: new Date().toISOString(),
     });
 
+    // Invalidate server.js in-memory greeting and agent metadata cache
+    try {
+      const port = process.env.PORT || "3000";
+      await fetch(`http://127.0.0.1:${port}/api/agent/cache-invalidate?agentId=${encodeURIComponent(id)}`, {
+        method: "POST",
+      }).catch(() => {});
+    } catch {}
+
     return NextResponse.json({
       success: true,
       agent: updated,
@@ -329,6 +365,8 @@ export async function PUT(
     );
   }
 }
+
+export const PATCH = PUT;
 
 export async function DELETE(
   _req: Request,

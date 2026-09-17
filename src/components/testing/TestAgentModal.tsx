@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X,
-  Send,
   Volume2,
   Sparkles,
   Zap,
@@ -16,12 +15,15 @@ import {
   ShieldAlert,
   Mic,
   MicOff,
-  Headphones,
   Radio,
   ChevronDown,
   ChevronUp,
   Terminal,
-  CheckCircle2,
+  PhoneOff,
+  Square,
+  Globe,
+  HelpCircle,
+  Play,
 } from "lucide-react";
 
 interface TestTurn {
@@ -49,40 +51,56 @@ interface TestAgentModalProps {
   onClose: () => void;
   agentId?: string;
   agentName?: string;
+  initialGreeting?: string;
+  instructions?: string;
+  systemPrompt?: string;
 }
 
-const samplePrompts = [
-  "మీ services గురించి చెప్పండి.",
-  "మాకు నెలకు ₹25,000 లోపు ప్యాకేజీ కావాలి.",
-  "రేపు ఉదయం 10:30 AM కి డెమో షెడ్యూల్ చేయండి.",
-  "Hyderabad లో మీ ఆఫీస్ ఎక్కడ ఉంది?",
-  "చాలా సంతోషం అండి, వివరాలు తెలిశాయి. బాయ్!",
-];
+type CallStatus = "IDLE" | "CONNECTING" | "LISTENING" | "THINKING" | "SPEAKING" | "MUTED";
 
 export function TestAgentModal({
   isOpen,
   onClose,
   agentId,
   agentName = "Telugu Sales Agent",
+  initialGreeting = "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
+  instructions,
+  systemPrompt,
 }: TestAgentModalProps) {
-  const [inputMessage, setInputMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const [callStatus, setCallStatus] = useState<CallStatus>("IDLE");
+  const [liveTranscript, setLiveTranscript] = useState<string>("");
+  const [callDuration, setCallDuration] = useState<number>(0);
+  const [speechLanguage, setSpeechLanguage] = useState<"te-IN" | "en-IN">("te-IN");
+  const [isMuted, setIsMuted] = useState<boolean>(false);
   const [openTraceIndex, setOpenTraceIndex] = useState<number | null>(null);
-  const recognitionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const [isTranscriptExpanded, setIsTranscriptExpanded] = useState<boolean>(false);
+  const [micVolumeLevel, setMicVolumeLevel] = useState<number>(0);
+  const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
+  const [showManualFallback, setShowManualFallback] = useState<boolean>(false);
+  const [manualText, setManualText] = useState<string>("");
 
   const [turns, setTurns] = useState<TestTurn[]>([
     {
       role: "ai",
-      text: "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
-      normalizedText: "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
-      timestamp: "Just now",
+      text: initialGreeting,
+      normalizedText: initialGreeting,
+      timestamp: "00:00",
     },
   ]);
 
+  // Audio & Speech refs
+  const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const activeAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const micMediaStreamRef = useRef<MediaStream | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isListeningIntentionalRef = useRef<boolean>(false);
+
   // Play PCM audio from Cartesia base64 string
-  const playPcmAudio = async (base64: string, sampleRate = 16000) => {
+  const playPcmAudio = useCallback(async (base64: string, sampleRate = 16000, onEnded?: () => void) => {
     try {
       const binaryString = window.atob(base64);
       const len = binaryString.length;
@@ -98,14 +116,22 @@ export function TestAgentModal({
       }
 
       if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
-          sampleRate,
-        });
+        audioContextRef.current = new (
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        )({ sampleRate });
       }
 
       const ctx = audioContextRef.current;
       if (ctx.state === "suspended") {
         await ctx.resume();
+      }
+
+      // Stop any prior playing audio
+      if (activeAudioSourceRef.current) {
+        try {
+          activeAudioSourceRef.current.stop();
+        } catch {}
       }
 
       const buffer = ctx.createBuffer(1, float32Array.length, sampleRate);
@@ -114,526 +140,862 @@ export function TestAgentModal({
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
+
+      source.onended = () => {
+        activeAudioSourceRef.current = null;
+        if (onEnded) onEnded();
+      };
+
+      activeAudioSourceRef.current = source;
+      setCallStatus("SPEAKING");
       source.start();
     } catch (e) {
       console.warn("Audio playback error:", e);
+      if (onEnded) onEnded();
     }
-  };
+  }, []);
 
-  // Toggle Microphone Speech Recognition (Web Speech API)
-  const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
-      return;
+  // Stop current agent audio (for barge-in interruption)
+  const interruptAgentAudio = useCallback(() => {
+    if (activeAudioSourceRef.current) {
+      try {
+        activeAudioSourceRef.current.stop();
+        activeAudioSourceRef.current = null;
+      } catch {}
     }
+  }, []);
+
+  // Submit spoken turn to backend AI orchestrator & Cartesia TTS
+  const handleTurnSubmit = useCallback(
+    async (spokenText: string) => {
+      const textToSend = spokenText.trim();
+      if (!textToSend) return;
+
+      // Stop recognition while waiting for AI response
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+
+      setCallStatus("THINKING");
+      setLiveTranscript("");
+
+      const callerTurn: TestTurn = {
+        role: "caller",
+        text: textToSend,
+        timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+      };
+
+      setTurns((prev) => [...prev, callerTurn]);
+
+      try {
+        const conversationHistory = [...turns, callerTurn].map((t) => ({
+          role: t.role === "caller" ? "user" : "assistant",
+          content: t.text,
+        }));
+
+        const effectivePrompt = (systemPrompt || instructions || "").trim();
+        const res = await fetch("/api/agent/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId,
+            agentName,
+            systemPrompt: effectivePrompt,
+            instructions: effectivePrompt,
+            userMessage: textToSend,
+            conversationHistory,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          const aiTurn: TestTurn = {
+            role: "ai",
+            text: data.rawReply,
+            normalizedText: data.normalizedReply,
+            intent: data.intent || "General Inquiry",
+            customerInput: textToSend,
+            cartesiaVoiceId: data.cartesiaVoiceId,
+            retrievedSnippets: data.retrievedSnippets,
+            toolCalls: data.toolCalls,
+            qualityValidation: data.qualityValidation,
+            latencies: data.latencies,
+            audioBase64: data.audioBase64,
+            timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+          };
+
+          setTurns((prev) => [...prev, aiTurn]);
+
+          // Play Cartesia spoken audio
+          if (data.audioBase64) {
+            playPcmAudio(data.audioBase64, data.sampleRate || 16000, () => {
+              // Once agent finishes speaking, automatically re-arm mic for continuous caller speech
+              if (!isMuted && isListeningIntentionalRef.current) {
+                startListening();
+              } else {
+                setCallStatus("IDLE");
+              }
+            });
+          } else {
+            // No audio returned, re-arm listening after short pause
+            setTimeout(() => {
+              if (!isMuted && isListeningIntentionalRef.current) {
+                startListening();
+              }
+            }, 800);
+          }
+        } else {
+          setTurns((prev) => [
+            ...prev,
+            {
+              role: "ai",
+              text: `(Error: ${data.error || "Turn processing failed"})`,
+              timestamp: "Error",
+            },
+          ]);
+          setCallStatus("IDLE");
+        }
+      } catch (err) {
+        console.error("Test turn error:", err);
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: "ai",
+            text: "(Network error reaching voice test pipeline)",
+            timestamp: "Error",
+          },
+        ]);
+        setCallStatus("IDLE");
+      }
+    },
+    [agentId, turns, isMuted, playPcmAudio]
+  );
+
+  // Start continuous Web Speech Recognition
+  const startListening = useCallback(() => {
+    if (isMuted) return;
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Voice speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      setMicErrorMessage("Speech recognition not supported in this browser. Please use Chrome or Edge.");
+      setShowManualFallback(true);
       return;
     }
 
     try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+
       const recognition = new SpeechRecognition();
       recognitionRef.current = recognition;
-      recognition.continuous = false;
+      recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = "te-IN"; // Telugu / Indian English
+      recognition.lang = speechLanguage;
 
       recognition.onstart = () => {
-        setIsListening(true);
+        setCallStatus("LISTENING");
+        setMicErrorMessage(null);
+        isListeningIntentionalRef.current = true;
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join("");
-        setInputMessage(transcript);
+        // If agent was speaking and user begins talking, execute barge-in
+        interruptAgentAudio();
+
+        let interim = "";
+        let final = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const trans = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            final += trans;
+          } else {
+            interim += trans;
+          }
+        }
+
+        const currentSpoken = (final || interim).trim();
+        setLiveTranscript(currentSpoken);
+
+        // Reset silence timer on every new word detected
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+        }
+
+        if (final.trim()) {
+          // Final sentence segment detected: auto-submit after natural 600ms boundary
+          silenceTimerRef.current = setTimeout(() => {
+            handleTurnSubmit(final.trim());
+          }, 600);
+        } else if (currentSpoken.length > 2) {
+          // Continuous interim speech: wait for 1300ms pause of silence, then auto-submit
+          silenceTimerRef.current = setTimeout(() => {
+            if (currentSpoken.trim()) {
+              handleTurnSubmit(currentSpoken.trim());
+            }
+          }, 1300);
+        }
       };
 
-      recognition.onerror = () => {
-        setIsListening(false);
+      recognition.onerror = (event: any) => {
+        if (event.error === "no-speech") return;
+        if (event.error === "not-allowed") {
+          setMicErrorMessage("Microphone access blocked. Please allow mic permission in your browser address bar.");
+          setCallStatus("IDLE");
+          setShowManualFallback(true);
+        }
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        // Auto-restart if we are still meant to be in listening state and not waiting for AI turn
+        if (
+          isListeningIntentionalRef.current &&
+          callStatus !== "THINKING" &&
+          callStatus !== "SPEAKING" &&
+          !isMuted
+        ) {
+          try {
+            recognition.start();
+          } catch {}
+        }
       };
 
       recognition.start();
     } catch (e) {
-      console.warn("Speech recognition error:", e);
-      setIsListening(false);
+      console.warn("Speech recognition start failed:", e);
     }
-  };
+  }, [speechLanguage, isMuted, callStatus, handleTurnSubmit, interruptAgentAudio]);
 
-  const handleSend = async (messageText?: string) => {
-    const textToSend = messageText || inputMessage;
-    if (!textToSend.trim() || isLoading) return;
-
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+  // Stop listening
+  const stopListening = useCallback(() => {
+    isListeningIntentionalRef.current = false;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
     }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+  }, []);
 
-    const callerTurn: TestTurn = {
-      role: "caller",
-      text: textToSend,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-
-    const updatedTurns = [...turns, callerTurn];
-    setTurns(updatedTurns);
-    setInputMessage("");
-    setIsLoading(true);
-
+  // Initialize Microphone decibel audio analyser for animated waveform
+  const initMicAnalyser = useCallback(async () => {
     try {
-      // Format history so agent has multi-turn memory
-      const conversationHistory = updatedTurns.map((t) => ({
-        role: t.role === "caller" ? "user" : "assistant",
-        content: t.text,
-      }));
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micMediaStreamRef.current = stream;
 
+      const audioCtx = new (
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      )();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      micAnalyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVolume = () => {
+        if (!micAnalyserRef.current) return;
+        micAnalyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setMicVolumeLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+    } catch (err) {
+      console.warn("Could not capture mic stream for volume visualizer:", err);
+    }
+  }, []);
+
+  // Connect call when modal opens
+  const connectCall = useCallback(async () => {
+    setCallStatus("CONNECTING");
+    setCallDuration(0);
+    setMicErrorMessage(null);
+
+    // Start duration timer
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = setInterval(() => {
+      setCallDuration((prev) => prev + 1);
+    }, 1000);
+
+    // Initialize mic analyser
+    await initMicAnalyser();
+
+    // Trigger initial agent greeting voice synthesis
+    try {
+      const effectivePrompt = (systemPrompt || instructions || "").trim();
       const res = await fetch("/api/agent/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId,
-          userMessage: textToSend,
-          conversationHistory,
+          agentName,
+          systemPrompt: effectivePrompt,
+          instructions: effectivePrompt,
+          userMessage: initialGreeting,
+          conversationHistory: [],
         }),
       });
 
       const data = await res.json();
-
-      if (data.success) {
-        const aiTurn: TestTurn = {
-          role: "ai",
-          text: data.rawReply,
-          normalizedText: data.normalizedReply,
-          intent: data.intent || "General Inquiry",
-          customerInput: textToSend,
-          cartesiaVoiceId: data.cartesiaVoiceId,
-          retrievedSnippets: data.retrievedSnippets,
-          toolCalls: data.toolCalls,
-          qualityValidation: data.qualityValidation,
-          latencies: data.latencies,
-          audioBase64: data.audioBase64,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        };
-
-        setTurns((prev) => [...prev, aiTurn]);
-
-        if (data.audioBase64) {
-          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
-        }
+      if (data.success && data.audioBase64) {
+        playPcmAudio(data.audioBase64, data.sampleRate || 16000, () => {
+          startListening();
+        });
       } else {
-        setTurns((prev) => [
-          ...prev,
-          {
-            role: "ai",
-            text: `(Error: ${data.error || "Failed to process turn"})`,
-            timestamp: "Error",
-          },
-        ]);
+        startListening();
       }
     } catch {
-      setTurns((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          text: "(Network error reaching test endpoint)",
-          timestamp: "Error",
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
+      startListening();
     }
+  }, [agentId, initialGreeting, initMicAnalyser, playPcmAudio, startListening]);
+
+  // Clean up all audio streams and timers on close
+  const disconnectCall = useCallback(() => {
+    stopListening();
+    interruptAgentAudio();
+
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (micMediaStreamRef.current) {
+      micMediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      micMediaStreamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+
+    setCallStatus("IDLE");
+    setLiveTranscript("");
+    setMicVolumeLevel(0);
+  }, [stopListening, interruptAgentAudio]);
+
+  // Handle modal mount / open
+  useEffect(() => {
+    if (isOpen) {
+      connectCall();
+    } else {
+      disconnectCall();
+    }
+    return () => {
+      disconnectCall();
+    };
+  }, [isOpen]);
+
+  // Format timer MM:SS
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  // Toggle Mute
+  const toggleMute = () => {
+    if (isMuted) {
+      setIsMuted(false);
+      startListening();
+    } else {
+      setIsMuted(true);
+      stopListening();
+      setCallStatus("MUTED");
+    }
+  };
+
+  // Reset conversation
+  const resetCall = () => {
+    disconnectCall();
+    setTurns([
+      {
+        role: "ai",
+        text: initialGreeting,
+        normalizedText: initialGreeting,
+        timestamp: "00:00",
+      },
+    ]);
+    setTimeout(() => {
+      connectCall();
+    }, 200);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-3xl bg-white border border-[#EAEBE8] rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-[#EAEBE8] flex items-center justify-between bg-[#FAFAF8]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden text-slate-100">
+        {/* Top Calling Status Bar */}
+        <div className="px-5 py-4 border-b border-slate-800/80 bg-slate-900/90 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-100/80 text-emerald-800 flex items-center justify-center shrink-0">
-              <Bot className="w-5 h-5" />
+            <div className="relative">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                <Bot className="w-5 h-5" />
+              </div>
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 ${
+                  callStatus === "SPEAKING"
+                    ? "bg-indigo-500 animate-pulse"
+                    : callStatus === "LISTENING"
+                    ? "bg-emerald-500 animate-ping"
+                    : callStatus === "THINKING"
+                    ? "bg-amber-500 animate-spin"
+                    : "bg-slate-500"
+                }`}
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-heading font-bold text-slate-900 text-base tracking-tight">{agentName}</h3>
-                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold">
-                  Telugu + English
-                </span>
-                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
-                  Voice: AD Cloned (8kHz)
+                <h3 className="font-heading font-bold text-white text-base tracking-tight truncate">
+                  {agentName}
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold uppercase tracking-wider">
+                  Live Voice
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">Live Voice Agent Pipeline & Latency Simulator</p>
+              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                <span className="font-mono text-emerald-400 font-medium">
+                  {formatTime(callDuration)}
+                </span>
+                <span>•</span>
+                <span>Cartesia 16kHz Neural</span>
+                <span>•</span>
+                <span className="text-[11px] text-slate-400">
+                  {speechLanguage === "te-IN" ? "Telugu (te-IN)" : "English (en-IN)"}
+                </span>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Language Switcher */}
+            <button
+              onClick={() => {
+                const nextLang = speechLanguage === "te-IN" ? "en-IN" : "te-IN";
+                setSpeechLanguage(nextLang);
+                if (callStatus === "LISTENING") {
+                  stopListening();
+                  setTimeout(startListening, 100);
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-300 border border-slate-700 transition flex items-center gap-1.5"
+              title="Toggle Mic Speech Language"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{speechLanguage === "te-IN" ? "తెలుగు" : "EN"}</span>
+            </button>
 
             <button
-              onClick={() =>
-                setTurns([
-                  {
-                    role: "ai",
-                    text: "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
-                    normalizedText: "నమస్కారం అండి! QETADOTIN కి స్వాగతం. నేను మీకు ఏ విధంగా సహాయపడగలను?",
-                    timestamp: "Just now",
-                  },
-                ])
-              }
-              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
-              title="Reset conversation"
+              onClick={resetCall}
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
+              title="Redial / Reset conversation"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
+
             <button
-              onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+              onClick={() => {
+                disconnectCall();
+                onClose();
+              }}
+              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition"
+              title="End call"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Conversation Turns */}
-        <div className="flex-1 p-5 overflow-y-auto space-y-4 bg-slate-50/50">
-          {turns.map((turn, i) => (
-            <div
-              key={i}
-              className={`flex gap-3 ${turn.role === "caller" ? "justify-end" : "justify-start"}`}
+        {/* Central Hands-Free Mic Calling Room */}
+        <div className="flex-1 p-6 sm:p-8 flex flex-col items-center justify-center text-center relative overflow-y-auto">
+          {/* Subtle Ambient Glow */}
+          <div
+            className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ${
+              callStatus === "SPEAKING"
+                ? "bg-radial-indigo opacity-30"
+                : callStatus === "LISTENING"
+                ? "bg-radial-emerald opacity-25"
+                : "opacity-0"
+            }`}
+          />
+
+          {/* Large Pulsating Voice Orb */}
+          <div className="relative mb-8 mt-2">
+            {/* Pulsing Ripple Rings */}
+            {callStatus === "LISTENING" && (
+              <>
+                <div
+                  className="absolute -inset-4 rounded-full bg-emerald-500/20 animate-ping duration-1000"
+                  style={{ animationDuration: "2.4s" }}
+                />
+                <div
+                  className="absolute -inset-8 rounded-full border border-emerald-500/30 animate-pulse"
+                  style={{ transform: `scale(${1 + micVolumeLevel / 150})` }}
+                />
+              </>
+            )}
+
+            {callStatus === "SPEAKING" && (
+              <>
+                <div
+                  className="absolute -inset-6 rounded-full bg-indigo-500/25 animate-ping"
+                  style={{ animationDuration: "1.8s" }}
+                />
+                <div className="absolute -inset-10 rounded-full border border-indigo-500/40 animate-pulse" />
+              </>
+            )}
+
+            {callStatus === "THINKING" && (
+              <div className="absolute -inset-6 rounded-full border-2 border-dashed border-amber-500/50 animate-spin duration-700" />
+            )}
+
+            {/* Central Interactive Orb Button */}
+            <button
+              onClick={() => {
+                if (callStatus === "SPEAKING") {
+                  // Barge in!
+                  interruptAgentAudio();
+                  startListening();
+                } else if (callStatus === "LISTENING") {
+                  toggleMute();
+                } else if (isMuted || callStatus === "MUTED") {
+                  toggleMute();
+                } else {
+                  startListening();
+                }
+              }}
+              className={`relative w-28 h-28 sm:w-32 sm:h-32 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all duration-300 ${
+                callStatus === "LISTENING"
+                  ? "bg-emerald-600 text-white ring-8 ring-emerald-500/20 shadow-emerald-900/50 scale-105"
+                  : callStatus === "SPEAKING"
+                  ? "bg-indigo-600 text-white ring-8 ring-indigo-500/20 shadow-indigo-900/50 scale-105"
+                  : callStatus === "THINKING"
+                  ? "bg-amber-600 text-white ring-8 ring-amber-500/20 shadow-amber-900/50"
+                  : isMuted
+                  ? "bg-rose-900/80 text-rose-300 ring-8 ring-rose-900/20"
+                  : "bg-slate-800 text-slate-300 ring-4 ring-slate-700"
+              }`}
             >
-              {turn.role === "ai" && (
-                <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4" />
-                </div>
-              )}
-
-              <div
-                className={`max-w-[85%] rounded-2xl p-4 text-sm ${
-                  turn.role === "caller"
-                    ? "bg-emerald-900 text-white shadow-xs"
-                    : "bg-white border border-[#EAEBE8] text-slate-900 shadow-xs"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4 mb-1">
-                  <span className="text-[11px] font-semibold opacity-80">
-                    {turn.role === "caller" ? "Customer (You)" : "AI Agent"}
+              {callStatus === "LISTENING" ? (
+                <>
+                  <Mic className="w-10 h-10 animate-pulse" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
+                    Listening
                   </span>
-                  <span className="text-[10px] opacity-70">{turn.timestamp}</span>
-                </div>
-
-                <p className="leading-relaxed font-normal">{turn.text}</p>
-
-                {/* Show Telugu normalization breakdown if modified */}
-                {turn.normalizedText && turn.normalizedText !== turn.text && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 text-xs text-indigo-800">
-                    <span className="text-[10px] text-slate-400 block font-medium">
-                      Telugu Speech Normalized (Pre-TTS):
-                    </span>
-                    <p className="font-sans italic">{turn.normalizedText}</p>
-                  </div>
-                )}
-
-                {/* Grounded RAG Knowledge Badges */}
-                {turn.retrievedSnippets && turn.retrievedSnippets.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1 text-[11px]">
-                    <span className="text-[10px] text-indigo-600 font-semibold flex items-center gap-1">
-                      <BookOpen className="w-3 h-3 text-indigo-500" />
-                      RAG Grounded Knowledge ({turn.retrievedSnippets.length} chunks retrieved):
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {turn.retrievedSnippets.map((s, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50/80 text-indigo-800 border border-indigo-200/80 text-[10px]"
-                        >
-                          <span className="font-bold">[{s.source}]</span> {s.title}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Executed Tools Badges */}
-                {turn.toolCalls && turn.toolCalls.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1 text-[11px]">
-                    <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-                      <Wrench className="w-3 h-3" />
-                      Real Tool Executed:
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {turn.toolCalls.map((tc, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-mono"
-                        >
-                          <span className="font-bold">{tc.name}</span>
-                          <span>({Object.keys(tc.args).length > 0 ? JSON.stringify(tc.args) : "void"})</span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Quality Guardrail Note */}
-                {turn.qualityValidation?.wasModified && (
-                  <div className="mt-2 pt-1 text-[10px] text-amber-700 flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3 text-amber-600" />
-                    <span>Guardrail: {turn.qualityValidation.modificationReason}</span>
-                  </div>
-                )}
-
-                {/* Latency Breakdown Bar */}
-                {turn.latencies && (
-                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[11px]">
-                    <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 font-mono flex items-center gap-1 border border-slate-200">
-                      <Zap className="w-3 h-3 text-amber-500" />
-                      STT: {turn.latencies.sttMs}ms
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 font-mono flex items-center gap-1 border border-slate-200">
-                      <Sparkles className="w-3 h-3 text-indigo-600" />
-                      LLM: {turn.latencies.llmMs}ms
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 font-mono flex items-center gap-1 border border-slate-200">
-                      <Volume2 className="w-3 h-3 text-emerald-600" />
-                      TTS: {turn.latencies.ttsMs}ms
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-mono font-semibold ml-auto border border-emerald-200">
-                      Total: {turn.latencies.totalMs}ms
-                    </span>
-                  </div>
-                )}
-
-                {turn.audioBase64 && (
-                  <button
-                    onClick={() => playPcmAudio(turn.audioBase64!)}
-                    className="mt-2 text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    Replay Cloned Voice
-                  </button>
-                )}
-
-                {/* Section 17 Debug Trace (Customer Input → Intent → Knowledge Search → Retrieved Info → Tool Call → Tool Result → Agent Response → TTS Response) */}
-                {turn.role === "ai" && turn.customerInput && (
-                  <div className="mt-3 pt-2.5 border-t border-slate-100">
-                    <button
-                      onClick={() => setOpenTraceIndex(openTraceIndex === i ? null : i)}
-                      className="flex items-center justify-between w-full text-[11px] font-bold text-slate-700 hover:text-indigo-600 transition"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Terminal className="w-3.5 h-3.5 text-indigo-600" />
-                        Runtime Debug Trace (Section 17)
-                      </span>
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1 font-medium">
-                        {openTraceIndex === i ? "Hide Trace" : "Show Trace"}
-                        {openTraceIndex === i ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </span>
-                    </button>
-
-                    {openTraceIndex === i && (
-                      <div className="mt-2.5 p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] space-y-2 border border-slate-800 animate-in fade-in duration-150">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                          <span>Live Call Pipeline Execution</span>
-                          <span className="text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Synced Cartesia Agent
-                          </span>
-                        </div>
-
-                        {/* 1. CUSTOMER INPUT */}
-                        <div>
-                          <span className="text-sky-400 font-bold block">CUSTOMER INPUT</span>
-                          <span className="text-slate-300 pl-3 block">&ldquo;{turn.customerInput}&rdquo;</span>
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 2. INTENT */}
-                        <div>
-                          <span className="text-purple-400 font-bold block">INTENT</span>
-                          <span className="text-slate-300 pl-3 block">{turn.intent || "General Inbound Query"}</span>
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 3. KNOWLEDGE SEARCH */}
-                        <div>
-                          <span className="text-amber-400 font-bold block">KNOWLEDGE SEARCH</span>
-                          <span className="text-slate-300 pl-3 block">
-                            Query: &ldquo;{turn.customerInput}&rdquo; | Scope: [org_active] + [{agentId || "agent_GaiYMgB9Bj9kaKW1tUgqSQ"}]
-                          </span>
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 4. RETRIEVED INFORMATION */}
-                        <div>
-                          <span className="text-amber-300 font-bold block">RETRIEVED INFORMATION</span>
-                          {turn.retrievedSnippets && turn.retrievedSnippets.length > 0 ? (
-                            <div className="pl-3 space-y-1 text-slate-300">
-                              {turn.retrievedSnippets.map((s, sIdx) => (
-                                <div key={sIdx} className="text-[10px]">
-                                  • [{s.source}] {s.title} (score: {s.score.toFixed(2)})
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 pl-3 block italic">No specific knowledge chunks needed for this intent</span>
-                          )}
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 5. TOOL CALL */}
-                        <div>
-                          <span className="text-emerald-400 font-bold block">TOOL CALL</span>
-                          {turn.toolCalls && turn.toolCalls.length > 0 ? (
-                            <div className="pl-3 space-y-0.5 text-slate-300">
-                              {turn.toolCalls.map((tc, tcIdx) => (
-                                <div key={tcIdx} className="text-[10px]">
-                                  Function: <span className="text-emerald-300">{tc.name}</span>({JSON.stringify(tc.args)})
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 pl-3 block italic">None invoked</span>
-                          )}
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 6. TOOL RESULT */}
-                        <div>
-                          <span className="text-emerald-300 font-bold block">TOOL RESULT</span>
-                          {turn.toolCalls && turn.toolCalls.length > 0 ? (
-                            <div className="pl-3 space-y-0.5 text-slate-300 text-[10px]">
-                              {turn.toolCalls.map((tc, tcIdx) => (
-                                <div key={tcIdx}>
-                                  Result: <span className="text-slate-200">{JSON.stringify(tc.result)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 pl-3 block italic">N/A</span>
-                          )}
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 7. AGENT RESPONSE */}
-                        <div>
-                          <span className="text-indigo-400 font-bold block">AGENT RESPONSE</span>
-                          <span className="text-slate-200 pl-3 block">&ldquo;{turn.text}&rdquo;</span>
-                        </div>
-
-                        <div className="text-slate-600 pl-3">↓</div>
-
-                        {/* 8. TTS RESPONSE */}
-                        <div>
-                          <span className="text-rose-400 font-bold block">TTS RESPONSE</span>
-                          <span className="text-slate-300 pl-3 block">
-                            {turn.audioBase64
-                              ? `Cartesia Sonic (${turn.latencies?.ttsMs || 120}ms) | Voice ID: ${turn.cartesiaVoiceId || "ff480e6e-3e79-4307-9889-d1d9feb8e20e"}`
-                              : "Pre-warmed audio cache"}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {turn.role === "caller" && (
-                <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 text-slate-700 flex items-center justify-center shrink-0">
-                  <User className="w-4 h-4" />
-                </div>
+                </>
+              ) : callStatus === "SPEAKING" ? (
+                <>
+                  <Volume2 className="w-10 h-10 animate-bounce" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
+                    Agent Speaking
+                  </span>
+                </>
+              ) : callStatus === "THINKING" ? (
+                <>
+                  <Activity className="w-10 h-10 animate-spin" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
+                    Thinking...
+                  </span>
+                </>
+              ) : isMuted ? (
+                <>
+                  <MicOff className="w-10 h-10" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
+                    Muted
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-10 h-10" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider mt-1 opacity-90">
+                    Tap to Speak
+                  </span>
+                </>
               )}
-            </div>
-          ))}
+            </button>
+          </div>
 
-          {isLoading && (
-            <div className="flex gap-3 items-center text-xs text-slate-500">
-              <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center animate-pulse">
-                <Bot className="w-4 h-4" />
+          {/* Dynamic Frequency Waveform Visualization */}
+          <div className="flex items-center justify-center gap-1.5 h-10 mb-6">
+            {[40, 65, 85, 100, 75, 50, 90, 60, 45, 70, 80, 55, 35].map((height, i) => {
+              const activeHeight =
+                callStatus === "LISTENING"
+                  ? Math.max(15, (height * micVolumeLevel) / 100)
+                  : callStatus === "SPEAKING"
+                  ? Math.max(20, Math.sin(Date.now() / 150 + i) * 35 + 45)
+                  : 12;
+
+              return (
+                <div
+                  key={i}
+                  className={`w-1.5 rounded-full transition-all duration-150 ${
+                    callStatus === "LISTENING"
+                      ? "bg-emerald-400"
+                      : callStatus === "SPEAKING"
+                      ? "bg-indigo-400"
+                      : "bg-slate-700 opacity-40"
+                  }`}
+                  style={{ height: `${activeHeight}px` }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Status Label / Directive */}
+          <div className="max-w-md mx-auto mb-4">
+            {callStatus === "LISTENING" && (
+              <p className="text-sm font-semibold text-emerald-400 animate-pulse">
+                🎙️ Speak into your microphone... (Hands-free auto turn)
+              </p>
+            )}
+            {callStatus === "SPEAKING" && (
+              <div className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-300">
+                <span>🔊 Cartesia Neural Voice is speaking...</span>
+                <button
+                  onClick={() => {
+                    interruptAgentAudio();
+                    startListening();
+                  }}
+                  className="px-2.5 py-0.5 rounded-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/30 transition flex items-center gap-1"
+                >
+                  <Square className="w-3 h-3 fill-current" />
+                  Interrupt
+                </button>
               </div>
-              <div className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2.5 rounded-xl shadow-xs">
-                <Activity className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
-                <span>Processing turn (STT → Normalizer → Cartesia Cloned TTS)...</span>
+            )}
+            {callStatus === "THINKING" && (
+              <p className="text-sm font-semibold text-amber-400 flex items-center justify-center gap-1.5">
+                <Activity className="w-4 h-4 animate-spin" />
+                Generating turn (Sarvam STT → Normalizer → Cartesia TTS)...
+              </p>
+            )}
+            {callStatus === "MUTED" && (
+              <p className="text-sm font-semibold text-rose-400">
+                Microphone is muted. Tap orb or Unmute to speak.
+              </p>
+            )}
+            {callStatus === "IDLE" && !micErrorMessage && (
+              <p className="text-sm text-slate-400">
+                Microphone idle. Tap the orb to resume speaking.
+              </p>
+            )}
+            {micErrorMessage && (
+              <div className="p-3 rounded-2xl bg-rose-950/60 border border-rose-800 text-rose-300 text-xs font-medium">
+                {micErrorMessage}
               </div>
+            )}
+          </div>
+
+          {/* Live Real-time Subtitles / Speech Transcript Caption */}
+          <div className="w-full max-w-xl min-h-[56px] px-6 py-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-center shadow-inner">
+            {liveTranscript ? (
+              <p className="text-sm sm:text-base font-medium text-emerald-300 italic animate-in fade-in">
+                "{liveTranscript}"
+              </p>
+            ) : callStatus === "SPEAKING" ? (
+              <p className="text-xs sm:text-sm text-indigo-200 line-clamp-2">
+                "{turns[turns.length - 1]?.text}"
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 font-mono">
+                {callStatus === "LISTENING"
+                  ? "Say something in Telugu or English (e.g. 'మీ సర్వీసెస్ గురించి చెప్పండి')..."
+                  : "Live subtitles will appear here as you speak..."}
+              </p>
+            )}
+          </div>
+
+          {/* Emergency Manual Fallback Option */}
+          {showManualFallback && (
+            <div className="w-full max-w-xl mt-4 p-3 rounded-2xl bg-slate-800/80 border border-slate-700 flex gap-2">
+              <input
+                type="text"
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && manualText.trim()) {
+                    handleTurnSubmit(manualText);
+                    setManualText("");
+                  }
+                }}
+                placeholder="Fallback: Type message here if mic blocked..."
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-xs text-white focus:outline-hidden focus:border-emerald-500"
+              />
+              <button
+                onClick={() => {
+                  if (manualText.trim()) {
+                    handleTurnSubmit(manualText);
+                    setManualText("");
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
+              >
+                Send
+              </button>
             </div>
           )}
         </div>
 
-        {/* Quick Sample Utterance Suggestions */}
-        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 overflow-x-auto flex gap-2">
-          <span className="text-[11px] text-slate-400 self-center shrink-0 font-medium">
-            Try Telugu:
-          </span>
-          {samplePrompts.map((p, idx) => (
+        {/* Collapsible Call Transcript & Section 17 Runtime Trace */}
+        <div className="border-t border-slate-800/80 bg-slate-950/80">
+          <div className="px-5 py-3 flex items-center justify-between">
             <button
-              key={idx}
-              onClick={() => handleSend(p)}
-              disabled={isLoading}
-              className="text-[11px] px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap transition disabled:opacity-50"
+              onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
+              className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white transition"
             >
-              {p}
+              <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Call Transcript & Latency Trace ({turns.length} turns)</span>
+              {isTranscriptExpanded ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5" />
+              )}
             </button>
-          ))}
+
+            <button
+              onClick={() => setShowManualFallback(!showManualFallback)}
+              className="text-[11px] text-slate-400 hover:text-slate-200 underline decoration-slate-600"
+            >
+              {showManualFallback ? "Hide typing option" : "Mic issues? Type instead"}
+            </button>
+          </div>
+
+          {isTranscriptExpanded && (
+            <div className="p-5 max-h-64 overflow-y-auto space-y-3 bg-slate-900/60 border-t border-slate-800">
+              {turns.map((turn, i) => (
+                <div
+                  key={i}
+                  className={`flex gap-3 ${
+                    turn.role === "caller" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  {turn.role === "ai" && (
+                    <div className="w-7 h-7 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 flex items-center justify-center shrink-0 text-xs">
+                      <Bot className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+
+                  <div
+                    className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
+                      turn.role === "caller"
+                        ? "bg-emerald-900/90 text-emerald-50 border border-emerald-700/50"
+                        : "bg-slate-800 text-slate-100 border border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-4 mb-1 text-[10px] opacity-70">
+                      <span className="font-bold">
+                        {turn.role === "caller" ? "You (Spoken into Mic)" : agentName}
+                      </span>
+                      <span>{turn.timestamp}</span>
+                    </div>
+
+                    <p>{turn.text}</p>
+
+                    {/* Section 17 Latencies */}
+                    {turn.latencies && (
+                      <div className="mt-2 pt-2 border-t border-slate-700/80 flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-300">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400">
+                          STT: {turn.latencies.sttMs}ms
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-indigo-400">
+                          LLM: {turn.latencies.llmMs}ms
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-emerald-400">
+                          TTS: {turn.latencies.ttsMs}ms
+                        </span>
+                        <span className="ml-auto font-bold text-emerald-300">
+                          Total: {turn.latencies.totalMs}ms
+                        </span>
+                      </div>
+                    )}
+
+                    {turn.audioBase64 && (
+                      <button
+                        onClick={() => playPcmAudio(turn.audioBase64!)}
+                        className="mt-1.5 text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                      >
+                        <Volume2 className="w-3 h-3" />
+                        Replay Audio
+                      </button>
+                    )}
+                  </div>
+
+                  {turn.role === "caller" && (
+                    <div className="w-7 h-7 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 flex items-center justify-center shrink-0 text-xs">
+                      <User className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Footer Input Bar */}
-        <div className="p-4 border-t border-slate-200 bg-white flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggleListening}
-            title={isListening ? "Stop listening" : "Speak via microphone (Telugu / English)"}
-            className={`p-2.5 rounded-xl border transition flex items-center justify-center shrink-0 ${
-              isListening
-                ? "bg-rose-500 text-white border-rose-600 animate-pulse shadow-md shadow-rose-200"
-                : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-            }`}
-          >
-            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder={isListening ? "Listening to your voice... Speak now" : "Type your message in Telugu or Tenglish (e.g. మీ ధర ఎంత?)..."}
-              disabled={isLoading}
-              className={`w-full px-5 py-3 rounded-full bg-white border text-slate-900 text-xs sm:text-sm focus:outline-hidden transition shadow-xs ${
-                isListening ? "border-rose-400 ring-2 ring-rose-100 placeholder-rose-400 font-medium" : "border-[#EAEBE8] focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10"
+        {/* Bottom Hands-Free Call Action Bar */}
+        <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleMute}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 border ${
+                isMuted
+                  ? "bg-rose-600 hover:bg-rose-500 text-white border-rose-500"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
               }`}
-            />
-            {isListening && (
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-rose-600 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
-                Listening
-              </span>
+            >
+              {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              <span>{isMuted ? "Unmute Mic" : "Mute Mic"}</span>
+            </button>
+
+            {callStatus === "SPEAKING" && (
+              <button
+                onClick={() => {
+                  interruptAgentAudio();
+                  startListening();
+                }}
+                className="px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition flex items-center gap-1.5"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Barge In (Interrupt)</span>
+              </button>
             )}
           </div>
-          <button
-            onClick={() => handleSend()}
-            disabled={isLoading || !inputMessage.trim()}
-            className="btn-emerald-primary text-xs px-5 py-3 shrink-0"
-          >
-            <Send className="w-4 h-4" />
-            <span>Send</span>
-          </button>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                disconnectCall();
+                onClose();
+              }}
+              className="px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950 transition flex items-center gap-2"
+            >
+              <PhoneOff className="w-4 h-4" />
+              <span>End Call</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,248 +1,710 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { X, Play, Pause, Volume2, Sparkles, Phone, Radio, ArrowRight } from "lucide-react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  X, Mic, Volume2, Phone, PhoneOff, ArrowRight, Radio, Loader2, Send, Globe, Play, Sparkles, CheckCircle2,
+} from "lucide-react";
 import Link from "next/link";
 
-interface LiveAgentAudioModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onOpenFullTest?: () => void;
 }
 
-interface AudioSnippet {
+interface AgentOption {
   id: string;
-  lang: string;
+  name: string;
   role: string;
-  speaker: string;
-  teluguText: string;
-  englishTranslation: string;
-  voiceId: string;
+  emoji: string;
+  greeting: string;
+  description: string;
+  sampleQuestions: string[];
 }
 
-const DEMO_SNIPPETS: AudioSnippet[] = [
+const AGENTS: AgentOption[] = [
   {
-    id: "snip-1",
-    lang: "Telugu / Tenglish",
+    id: "agent_minb6qwKNfwWXLV8gyRfRq",
+    name: "College Support",
+    role: "College Admissions & Attendance Helpline",
+    emoji: "🎓",
+    greeting: "నమస్కారం! నేను College Student Helpline నుండి మాట్లాడుతున్నాను. Admissions, fees, లేదా attendance గురించి ఏమైనా అడగాలంటే చెప్పండి.",
+    description: "Assists parents and students with attendance requirements (75% rule), exam fees, and semester academic counseling in polite natural Telugu.",
+    sampleQuestions: [
+      "What is the required attendance percentage?",
+      "కాలేజ్ అటెండెన్స్ రూల్స్ ఏంటి?",
+      "హాస్టల్ అండ్ ఎగ్జామ్ ఫీజు ఎంత?",
+    ],
+  },
+  {
+    id: "agent_GaiYMgB9Bj9kaKW1tUgqSQ",
+    name: "ABC Support",
     role: "Electronics Retail & Service Support",
-    speaker: "Aadarsh (Neural Telugu)",
-    teluguText: "హలో అండి! నేను Aadarsh మాట్లాడుతున్నాను, ABC Electronics నుంచి call చేస్తున్నాను. మీకు ఎలా సహాయం చేయగలను?",
-    englishTranslation: "Hello! I am Aadarsh calling from ABC Electronics. How may I assist you today?",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-  },
-  {
-    id: "snip-2",
-    lang: "Telugu / Tenglish",
-    role: "E-Commerce Delivery Verification",
-    speaker: "Aadarsh (COD Verification)",
-    teluguText: "మీ ఆర్డర్ 4567 ప్రస్తుతం హైదరాబాద్ Hub లో In Transit లో ఉంది అండి. రేపు మధ్యాహ్నం 2:00 PM కి డెలివరీ అవుతుంది.",
-    englishTranslation: "Your order 4567 is currently In Transit at Hyderabad Hub. It will be delivered tomorrow by 2:00 PM.",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-  },
-  {
-    id: "snip-3",
-    lang: "Telugu / Tenglish",
-    role: "Customer Warranty & Refund Policy",
-    speaker: "Aadarsh (Store Policy)",
-    teluguText: "డెలివరీ అయిన 7 రోజులలోపు రీఫండ్ అభ్యర్థించవచ్చు అండి. ప్రొడక్ట్ ఒరిజినల్ ప్యాకింగ్ లో ఉండాలి.",
-    englishTranslation: "Refund can be requested within 7 days of delivery. The product must be in its original packaging.",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    emoji: "🛒",
+    greeting: "హలో అండి! నేను ABC Electronics నుండి మాట్లాడుతున్నాను. Products, orders, లేదా service గురించి ఏమైనా సహాయం కావాలంటే చెప్పండి.",
+    description: "Handles customer inquiries regarding consumer appliances, refrigerators, warranties, repair bookings, and store locations in natural Telugu & Tenglish.",
+    sampleQuestions: [
+      "Do you sell refrigerators?",
+      "మీ షోరూమ్ ఎక్కడ ఉంది?",
+      "How to claim warranty for TV?",
+    ],
   },
 ];
 
-export function LiveAgentAudioModal({ isOpen, onClose, onOpenFullTest }: LiveAgentAudioModalProps) {
-  const [activeSnippet, setActiveSnippet] = useState<string>("snip-1");
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
+type ConvState = "idle" | "connecting" | "listening" | "processing" | "speaking" | "error";
+
+interface Message {
+  id: string;
+  role: "user" | "agent";
+  text: string;
+}
+
+const hasSpeechRecognition = () =>
+  typeof window !== "undefined" &&
+  ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+
+export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
+  const [selectedAgent, setSelectedAgent] = useState<AgentOption>(AGENTS[0]);
+  const [state, setState] = useState<ConvState>("idle");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [error, setError] = useState("");
+  const [micPartial, setMicPartial] = useState("");
+  const [textInput, setTextInput] = useState("");
+  const [sttLang, setSttLang] = useState<"te-IN" | "en-IN">("te-IN");
+
+  const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const isActiveRef = useRef(false);
+  const messagesRef = useRef<Message[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  if (!isOpen) return null;
+  // CRITICAL: Acoustic Echo / Recursive Self-Listening Prevention
+  // When the agent is speaking or the room echo tail is dissipating,
+  // the microphone is forcefully halted and any audio packets are discarded.
+  const isAgentSpeakingRef = useRef(false);
+  const echoGuardTimerRef = useRef<any>(null);
 
-  const currentSnippet = DEMO_SNIPPETS.find((s) => s.id === activeSnippet) || DEMO_SNIPPETS[0];
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
-  const handlePlayVoice = async (snippet: AudioSnippet) => {
-    setActiveSnippet(snippet.id);
-    setIsLoadingAudio(true);
-    setIsPlaying(false);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, micPartial]);
+
+  // Physical mic abort to guarantee zero microphone audio capture during speech
+  const stopMic = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setMicPartial("");
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch {}
+      currentSourceRef.current = null;
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
+
+  const endCall = useCallback(() => {
+    isActiveRef.current = false;
+    isAgentSpeakingRef.current = false;
+    if (echoGuardTimerRef.current) {
+      clearTimeout(echoGuardTimerRef.current);
+      echoGuardTimerRef.current = null;
+    }
+    stopAudio();
+    stopMic();
+    setState("idle");
+    setMicPartial("");
+    setTextInput("");
+  }, [stopAudio, stopMic]);
+
+  useEffect(() => {
+    if (!isOpen) endCall();
+    return () => endCall();
+  }, [isOpen, endCall]);
+
+  const addMessage = (role: "user" | "agent", text: string) => {
+    const msg: Message = { id: Date.now().toString() + Math.random(), role, text };
+    setMessages((p) => [...p, msg]);
+    return msg;
+  };
+
+  // Plays PCM 16kHz audio from Cartesia with strict acoustic echo isolation
+  const playPcmAudio = async (base64Audio: string): Promise<void> => {
+    // 1. Lock mutex & abort microphone IMMEDIATELY so system voice cannot leak into STT
+    isAgentSpeakingRef.current = true;
+    stopMic();
+    if (echoGuardTimerRef.current) {
+      clearTimeout(echoGuardTimerRef.current);
+      echoGuardTimerRef.current = null;
+    }
+
+    return new Promise(async (resolve) => {
+      try {
+        stopAudio();
+        const binaryString = atob(base64Audio);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const pcm16 = new Int16Array(bytes.buffer);
+        const float32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) {
+          float32[i] = pcm16[i] / 32768.0;
+        }
+
+        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+          audioContextRef.current = new Ctx({ sampleRate: 16000 });
+        }
+        const ctx = audioContextRef.current;
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+        }
+
+        const buf = ctx.createBuffer(1, float32.length, 16000);
+        buf.copyToChannel(float32, 0);
+
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        currentSourceRef.current = src;
+
+        src.onended = () => {
+          currentSourceRef.current = null;
+          // Acoustic dissipation guard window (400ms): wait for speaker soundwaves
+          // in the room to dissipate before opening the microphone to listen to human
+          echoGuardTimerRef.current = setTimeout(() => {
+            isAgentSpeakingRef.current = false;
+            resolve();
+          }, 400);
+        };
+
+        src.start(0);
+      } catch (e) {
+        console.warn("[LiveAgentModal] Audio playback error:", e);
+        isAgentSpeakingRef.current = false;
+        resolve();
+      }
+    });
+  };
+
+  // Browser Web Speech fallback with the same echo guard
+  const playBrowserSpeech = (text: string): Promise<void> => {
+    isAgentSpeakingRef.current = true;
+    stopMic();
+    if (echoGuardTimerRef.current) {
+      clearTimeout(echoGuardTimerRef.current);
+      echoGuardTimerRef.current = null;
+    }
+
+    return new Promise((resolve) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        isAgentSpeakingRef.current = false;
+        resolve();
+        return;
+      }
+      stopAudio();
+      const utt = new SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      const matchVoice = voices.find(
+        (v) => v.lang.startsWith("te") || v.lang.startsWith("hi") || v.lang.startsWith("en-IN")
+      );
+      if (matchVoice) utt.voice = matchVoice;
+      utt.lang = sttLang === "te-IN" ? "te-IN" : "en-IN";
+      utt.rate = 0.95;
+
+      utt.onend = () => {
+        echoGuardTimerRef.current = setTimeout(() => {
+          isAgentSpeakingRef.current = false;
+          resolve();
+        }, 400);
+      };
+
+      utt.onerror = () => {
+        isAgentSpeakingRef.current = false;
+        resolve();
+      };
+
+      window.speechSynthesis.speak(utt);
+    });
+  };
+
+  const startListening = useCallback(() => {
+    if (!isActiveRef.current) return;
+
+    // Reject listening if agent is speaking or echo dissipation tail is active
+    if (isAgentSpeakingRef.current) {
+      console.log("[ECHO_GUARD] Refusing startListening: agent is speaking or echo dissipating");
+      return;
+    }
+
+    if (!hasSpeechRecognition()) {
+      setState("listening"); // allows text input
+      return;
+    }
+
+    setState("listening");
+    setMicPartial("");
 
     try {
-      // Call backend Cartesia test endpoint to synthesize speech dynamically
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
+      }
+
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SR();
+      recognitionRef.current = recognition;
+      recognition.lang = sttLang;
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (e: any) => {
+        // Critical: Drop any mic audio captured while agent was outputting audio
+        if (isAgentSpeakingRef.current) {
+          console.warn("[ECHO_GUARD] Discarded mic event: speaker audio was active");
+          return;
+        }
+
+        const last = e.results[e.results.length - 1];
+        const transcript = last[0]?.transcript || "";
+        if (last.isFinal) {
+          try { recognition.abort(); } catch {}
+          if (transcript.trim()) {
+            handleUserMessage(transcript.trim());
+          } else if (isActiveRef.current && !isAgentSpeakingRef.current) {
+            startListening();
+          }
+        } else {
+          setMicPartial(transcript);
+        }
+      };
+
+      recognition.onerror = (e: any) => {
+        if (e.error === "no-speech") {
+          if (isActiveRef.current && state === "listening" && !isAgentSpeakingRef.current) {
+            try { recognition.start(); } catch {}
+          }
+        } else if (e.error === "not-allowed") {
+          setError("Microphone access blocked. You can type your message below!");
+        }
+      };
+
+      recognition.onend = () => {
+        if (isActiveRef.current && state === "listening" && !isAgentSpeakingRef.current) {
+          // Restart if needed
+        }
+      };
+
+      recognition.start();
+    } catch (err) {
+      console.warn("[LiveAgentModal] SpeechRecognition error:", err);
+    }
+  }, [sttLang, state]);
+
+  // Executes a single turn: user input -> Cartesia LLM response -> play audio -> resume listening
+  const handleUserMessage = async (userText: string) => {
+    if (!isActiveRef.current || !userText.trim()) return;
+
+    // Immediately stop mic and audio to prevent any interference
+    stopMic();
+    stopAudio();
+
+    setState("processing");
+    addMessage("user", userText);
+    setMicPartial("");
+    setTextInput("");
+
+    try {
+      const history = messagesRef.current.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        content: m.text,
+      }));
+
       const res = await fetch("/api/agent/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userMessage: snippet.teluguText,
+          agentId: selectedAgent.id,
+          userMessage: userText,
+          conversationHistory: history,
         }),
       });
 
       const data = await res.json();
+      const reply = data.normalizedReply || data.rawReply || "మీ అభ్యర్థనను పరిశీలిస్తున్నాను. దయచేసి వివరాలు చెప్పండి.";
+
+      if (!isActiveRef.current) return;
+
+      // Add agent reply
+      addMessage("agent", reply);
+      setState("speaking");
+
+      // Play synthesized audio directly (single turn)
       if (data.audioBase64) {
-        // Decode and play PCM / audio
-        const binaryString = window.atob(data.audioBase64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        const int16Array = new Int16Array(bytes.buffer);
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-          float32Array[i] = int16Array[i] / 32768.0;
-        }
-
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        const ctx = audioContextRef.current || new AudioCtx({ sampleRate: 16000 });
-        audioContextRef.current = ctx;
-
-        if (ctx.state === "suspended") await ctx.resume();
-
-        const audioBuffer = ctx.createBuffer(1, float32Array.length, 16000);
-        audioBuffer.copyToChannel(float32Array, 0);
-
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        source.start();
-
-        setIsPlaying(true);
-        source.onended = () => setIsPlaying(false);
+        await playPcmAudio(data.audioBase64);
       } else {
-        // Fallback speech synthesis if audioBase64 not returned
-        const utterance = new SpeechSynthesisUtterance(snippet.teluguText);
-        utterance.lang = "te-IN";
-        utterance.onend = () => setIsPlaying(false);
-        window.speechSynthesis.speak(utterance);
-        setIsPlaying(true);
+        await playBrowserSpeech(reply);
+      }
+
+      // Resume listening once speech & acoustic guard finish
+      if (isActiveRef.current) {
+        startListening();
       }
     } catch (err) {
-      console.warn("Audio playback exception, falling back to speech synthesis:", err);
-      const utterance = new SpeechSynthesisUtterance(snippet.teluguText);
-      utterance.lang = "te-IN";
-      utterance.onend = () => setIsPlaying(false);
-      window.speechSynthesis.speak(utterance);
-      setIsPlaying(true);
-    } finally {
-      setIsLoadingAudio(false);
+      console.error("[LiveAgentModal] Turn error:", err);
+      if (isActiveRef.current) {
+        addMessage("agent", "క్షమించండి, చిన్న సమస్య వచ్చింది. దయచేసి మళ్ళీ చెప్పండి.");
+        setState("speaking");
+        await playBrowserSpeech("క్షమించండి, చిన్న సమస్య వచ్చింది. దయచేసి మళ్ళీ చెప్పండి.");
+        if (isActiveRef.current) startListening();
+      }
     }
   };
 
+  // Explicit user trigger: Start conversation after agent selection
+  const startConversation = async () => {
+    setError("");
+    setMessages([]);
+    isActiveRef.current = true;
+    setState("connecting");
+
+    // Display agent greeting in chat
+    addMessage("agent", selectedAgent.greeting);
+    setState("speaking");
+
+    try {
+      // Synthesize greeting with Cartesia cloned voice using ttsOnly
+      const res = await fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: selectedAgent.id,
+          ttsOnly: true,
+          textToSpeak: selectedAgent.greeting,
+        }),
+      });
+      const data = await res.json();
+
+      if (!isActiveRef.current) return;
+
+      if (data.audioBase64) {
+        await playPcmAudio(data.audioBase64);
+      } else {
+        await playBrowserSpeech(selectedAgent.greeting);
+      }
+
+      if (isActiveRef.current) {
+        startListening();
+      }
+    } catch (e) {
+      if (isActiveRef.current) {
+        await playBrowserSpeech(selectedAgent.greeting);
+        if (isActiveRef.current) startListening();
+      }
+    }
+  };
+
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textInput.trim()) return;
+    handleUserMessage(textInput.trim());
+  };
+
+  if (!isOpen) return null;
+
+  const isOnCall = state !== "idle" && state !== "error";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-2xl overflow-hidden">
-        {/* Top Header */}
-        <div className="flex items-center justify-between pb-5 border-b border-slate-100">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-200">
+      <div
+        className="relative w-full sm:max-w-[520px] bg-white sm:rounded-3xl border-t sm:border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+        style={{ height: "min(720px, 96dvh)" }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0 bg-white">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700">
-              <Volume2 className="w-4 h-4" />
+            <div
+              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                state === "speaking"
+                  ? "bg-emerald-100 ring-2 ring-emerald-400 ring-offset-1 animate-pulse"
+                  : state === "listening"
+                  ? "bg-red-50 ring-2 ring-red-400 ring-offset-1"
+                  : "bg-emerald-100"
+              }`}
+            >
+              {state === "listening" ? (
+                <Mic className="w-4 h-4 text-red-500" />
+              ) : (
+                <Volume2 className="w-4 h-4 text-emerald-700" />
+              )}
             </div>
             <div>
-              <h3 className="font-heading text-base font-bold text-slate-900">
-                Live Voice Agent Audition
+              <h3 className="font-heading text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <span>Live Voice Agent</span>
+                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                  Real Time
+                </span>
               </h3>
-              <p className="text-xs text-slate-500">
-                Powered by Cartesia Neural Telugu Engine
+              <p className="text-[11px] text-slate-500">
+                {isOnCall ? `Active Call with ${selectedAgent.name}` : "Select an agent and start conversation"}
               </p>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Snippet Selection Tabs */}
-        <div className="flex items-center gap-2 my-5 overflow-x-auto pb-1">
-          {DEMO_SNIPPETS.map((snippet, idx) => (
+          <div className="flex items-center gap-2">
+            {/* STT Input Language Toggle */}
             <button
-              key={snippet.id}
-              onClick={() => handlePlayVoice(snippet)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                activeSnippet === snippet.id
-                  ? "bg-emerald-900 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+              type="button"
+              onClick={() => setSttLang((l) => (l === "te-IN" ? "en-IN" : "te-IN"))}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+              title="Toggle input speech recognition language"
             >
-              Demo {idx + 1}: {snippet.role.split(" ")[0]}
+              <Globe className="w-3 h-3 text-slate-500" />
+              <span>{sttLang === "te-IN" ? "తెలుగు" : "English"}</span>
             </button>
-          ))}
-        </div>
 
-        {/* Active Audio Player Card */}
-        <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200/60 mb-6">
-          <div className="flex items-center justify-between text-xs text-emerald-800 font-semibold mb-2">
-            <span>{currentSnippet.role}</span>
-            <span className="flex items-center gap-1.5 text-emerald-700">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              {currentSnippet.speaker}
-            </span>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              title="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
+        </div>
 
-          <p className="font-heading text-lg font-bold text-slate-900 leading-snug mb-2">
-            &ldquo;{currentSnippet.teluguText}&rdquo;
-          </p>
+        {/* ─── AGENT SELECTOR & EXPLICIT START SECTION (When Idle) ─── */}
+        {state === "idle" && (
+          <div className="px-5 pt-4 pb-4 shrink-0 bg-slate-50/70 border-b border-slate-100 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                1. Select an Agent
+              </span>
+              <span className="text-[10px] text-slate-400">Step 1 of 2</span>
+            </div>
 
-          <p className="text-xs text-slate-500 italic">
-            &ldquo;{currentSnippet.englishTranslation}&rdquo;
-          </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              {AGENTS.map((ag) => (
+                <button
+                  key={ag.id}
+                  onClick={() => setSelectedAgent(ag)}
+                  className={`p-3 rounded-2xl border-2 text-left transition-all relative ${
+                    selectedAgent.id === ag.id
+                      ? "border-emerald-500 bg-white shadow-sm ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-white/70 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="text-2xl mb-1">{ag.emoji}</div>
+                  <div className="font-heading text-xs font-bold text-slate-900 leading-tight">
+                    {ag.name}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 leading-snug line-clamp-1">
+                    {ag.role}
+                  </div>
+                  {selectedAgent.id === ag.id && (
+                    <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-emerald-600 flex items-center justify-center">
+                      <CheckCircle2 className="w-3 h-3 text-white" />
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
 
-          {/* Player Button & Equalizer */}
-          <div className="mt-5 flex items-center justify-between pt-4 border-t border-emerald-200/50">
-            <button
-              onClick={() => handlePlayVoice(currentSnippet)}
-              disabled={isLoadingAudio}
-              className="btn-emerald-primary text-xs px-4 py-2"
-            >
-              {isLoadingAudio ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Synthesizing Voice...
-                </span>
-              ) : isPlaying ? (
-                <span className="flex items-center gap-2">
-                  <Pause className="w-3.5 h-3.5" />
-                  Playing Audio...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  Play Voice Sample
-                </span>
-              )}
-            </button>
-
-            {/* Visualizer bars */}
-            <div className="flex items-center gap-1 h-5 px-3">
-              <span className={`w-1 bg-emerald-600 rounded-full transition-all ${isPlaying ? "animate-eq-1" : "h-1.5 opacity-40"}`} />
-              <span className={`w-1 bg-emerald-600 rounded-full transition-all ${isPlaying ? "animate-eq-2" : "h-2 opacity-40"}`} />
-              <span className={`w-1 bg-emerald-600 rounded-full transition-all ${isPlaying ? "animate-eq-3" : "h-1.5 opacity-40"}`} />
-              <span className={`w-1 bg-emerald-600 rounded-full transition-all ${isPlaying ? "animate-eq-4" : "h-2.5 opacity-40"}`} />
-              <span className={`w-1 bg-emerald-600 rounded-full transition-all ${isPlaying ? "animate-eq-2" : "h-1.5 opacity-40"}`} />
+            {/* ── PROMINENT START BUTTON RIGHT BELOW AGENT SELECTION ── */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={startConversation}
+                className="w-full flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.99] group"
+              >
+                <Play className="w-4 h-4 fill-current transition-transform group-hover:scale-110" />
+                <span>Start Conversation with {selectedAgent.name}</span>
+                <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
+              </button>
             </div>
           </div>
+        )}
+
+        {/* ─── MAIN CONTENT AREA: CHAT FEED OR AGENT PREVIEW ─── */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 min-h-0 bg-[#FBFBFA]">
+          {/* Idle Agent Detail Preview */}
+          {state === "idle" && (
+            <div className="h-full flex flex-col justify-center space-y-4 py-2">
+              <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="text-3xl">{selectedAgent.emoji}</span>
+                  <div>
+                    <h4 className="font-heading text-sm font-bold text-slate-900">{selectedAgent.name}</h4>
+                    <p className="text-xs text-slate-500">{selectedAgent.role}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed mb-3">
+                  {selectedAgent.description}
+                </p>
+                <div className="pt-2.5 border-t border-slate-100">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Sample Questions to Ask:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedAgent.sampleQuestions.map((q, idx) => (
+                      <span
+                        key={idx}
+                        className="text-[11px] bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full"
+                      >
+                        &ldquo;{q}&rdquo;
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Active Call Messages */}
+          {isOnCall &&
+            messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in duration-200`}
+              >
+                {msg.role === "agent" && (
+                  <span className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5 mr-2 text-sm shadow-xs">
+                    {selectedAgent.emoji}
+                  </span>
+                )}
+                <div
+                  className={`max-w-[82%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-xs ${
+                    msg.role === "user"
+                      ? "bg-slate-900 text-white rounded-br-sm"
+                      : "bg-white border border-slate-200/90 text-slate-900 rounded-bl-sm"
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+
+          {/* Live Microphone Interim Partial */}
+          {micPartial && (
+            <div className="flex justify-end">
+              <div className="max-w-[82%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed bg-slate-200/90 text-slate-700 rounded-br-sm italic animate-pulse">
+                {micPartial}...
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
 
-        {/* Footer CTAs */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-          <Link
-            href="/dashboard"
-            onClick={onClose}
-            className="text-xs font-semibold text-slate-600 hover:text-emerald-800 transition flex items-center gap-1"
-          >
-            <span>Open Interactive Dashboard</span>
-            <ArrowRight className="w-3 h-3" />
-          </Link>
+        {/* ─── CALL STATUS & CONTROL BAR ─── */}
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-white shrink-0 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+            {state === "idle" && (
+              <span className="text-slate-500 font-medium">Ready · Click green button to start</span>
+            )}
+            {state === "connecting" && (
+              <span className="flex items-center gap-2 text-amber-700 font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                Connecting with {selectedAgent.name}...
+              </span>
+            )}
+            {state === "listening" && (
+              <span className="flex items-center gap-2 text-red-600 font-semibold animate-pulse">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0 shadow-[0_0_8px_#ef4444]" />
+                <span>Listening... speak or type below</span>
+              </span>
+            )}
+            {state === "processing" && (
+              <span className="flex items-center gap-2 text-slate-600 font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 shrink-0" />
+                {selectedAgent.name} formulating response...
+              </span>
+            )}
+            {state === "speaking" && (
+              <span className="flex items-center gap-2 text-emerald-700 font-semibold">
+                <span className="flex items-end gap-0.5 h-3.5">
+                  {[12, 18, 10, 16, 8, 20, 12].map((h, i) => (
+                    <span
+                      key={i}
+                      className="w-0.5 rounded-full bg-emerald-500"
+                      style={{
+                        height: `${h}px`,
+                        animation: `pulse ${0.35 + i * 0.08}s ease-in-out infinite alternate`,
+                      }}
+                    />
+                  ))}
+                </span>
+                <span>{selectedAgent.name} speaking (Mic muted to prevent echo)</span>
+              </span>
+            )}
+            {state === "error" && (
+              <span className="text-red-600 font-medium truncate">{error || "Connection error"}</span>
+            )}
+          </div>
 
-          <Link
-            href="/signup"
-            onClick={onClose}
-            className="btn-emerald-primary w-full sm:w-auto text-xs px-4 py-2"
+          <div className="shrink-0">
+            {isOnCall ? (
+              <button
+                onClick={endCall}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all shadow-sm active:scale-95"
+              >
+                <PhoneOff className="w-3.5 h-3.5" />
+                End Call
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {/* ─── DUAL INPUT BAR: SPEAK OR TYPE ─── */}
+        {isOnCall && (
+          <form
+            onSubmit={handleTextSubmit}
+            className="p-3 bg-slate-50 border-t border-slate-200 shrink-0 flex items-center gap-2"
           >
-            Deploy This Agent →
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="Speak via mic or type here..."
+              disabled={state === "processing"}
+              className="flex-1 text-xs px-4 py-2.5 rounded-full border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 text-slate-800 placeholder:text-slate-400"
+            />
+
+            <button
+              type="submit"
+              disabled={!textInput.trim() || state === "processing"}
+              className="p-2.5 rounded-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-40 disabled:cursor-not-allowed transition shrink-0 shadow-xs"
+              title="Send message"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        )}
+
+        {/* Footer */}
+        <div className="px-5 py-2.5 border-t border-slate-100 flex items-center justify-between shrink-0 bg-white">
+          <Link
+            href="/login"
+            onClick={onClose}
+            className="text-[11px] font-semibold text-slate-600 hover:text-emerald-800 transition flex items-center gap-1"
+          >
+            Open Console <ArrowRight className="w-3 h-3" />
           </Link>
+          <span className="text-[10px] text-slate-400 flex items-center gap-1">
+            <Radio className="w-2.5 h-2.5 text-emerald-500" /> Echo-Isolated Real-Time Audio
+          </span>
         </div>
       </div>
     </div>

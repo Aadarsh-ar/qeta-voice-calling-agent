@@ -15,6 +15,7 @@ export interface SyncAgentParams extends CompilePromptParams {
   cartesiaAgentId?: string;
   cartesiaVoiceId?: string;
   description?: string;
+  initialMessage?: string;
   customGreeting?: string;
   transferPhoneNumber?: string;
 }
@@ -48,13 +49,19 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     throw new Error("Agent name is required for Cartesia synchronization.");
   }
 
-  // 1. Compile prompt and greeting according to 8-level instruction priority
-  const compiledInstructions = compileAgentInstructions(params);
-  const compiledGreeting = compileAgentGreeting({
-    agentName: params.agentName,
-    businessName: params.businessName,
-    customGreeting: params.customGreeting,
-  });
+  const rawInstructions = (params.instructions || "").trim();
+  // Exact Parity: The user's instructions given in the site must match Cartesia's agent instructions verbatim.
+  // When the user provides instructions in the site, send them directly to Cartesia without mangling.
+  // Fall back to compiler only if the user hasn't provided any instructions yet.
+  const finalInstructions = rawInstructions || compileAgentInstructions(params);
+
+  const finalGreeting =
+    (params.initialMessage || params.customGreeting || "").trim() ||
+    compileAgentGreeting({
+      agentName: params.agentName,
+      businessName: params.businessName,
+      language: params.language,
+    });
 
   const voiceId = params.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
   const languageCode = params.language === "ENGLISH" ? "en" : "te";
@@ -63,10 +70,10 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
   // 2. Prepare payload conforming strictly to Cartesia Agent API schema
   const payload: Record<string, unknown> = {
     name: params.agentName.trim(),
-    description: params.businessDescription || params.businessName || "QETADOTIN Voice Agent",
+    description: params.description || params.businessDescription || "QETADOTIN Voice Agent",
     config: {
-      instructions: compiledInstructions,
-      initial_message: compiledGreeting,
+      instructions: finalInstructions,
+      initial_message: finalGreeting,
       model: {
         id: "gemini-2.5-flash",
         temperature: 0.2, // Extreme low latency, highly deterministic
@@ -161,8 +168,8 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     cartesiaAgentId: resultingAgentId,
     cartesiaVersionId: verifiedVersionId,
     updatedAt: result.updated_at || new Date().toISOString(),
-    instructions: compiledInstructions,
-    initialMessage: compiledGreeting,
+    instructions: finalInstructions,
+    initialMessage: finalGreeting,
     voiceId,
     language: languageCode,
   };

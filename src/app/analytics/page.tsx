@@ -138,22 +138,22 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Agent Performance Summary */}
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
+        <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
           <h3 className="text-base font-bold text-slate-900 tracking-tight">Agent Performance</h3>
           <div className="divide-y divide-slate-100">
             {agents.map((agent) => (
-              <div key={agent.id} className="py-3.5 flex items-center justify-between text-xs">
+              <div key={agent.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100 shrink-0">
                     <Bot className="w-4 h-4" />
                   </div>
-                  <div>
-                    <span className="font-bold text-slate-900 block">{agent.name}</span>
+                  <div className="min-w-0">
+                    <span className="font-bold text-slate-900 block truncate">{agent.name}</span>
                     <span className="text-slate-500 text-[11px] font-mono">{agent.phoneNumber || "No number"}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-8">
+                <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-8 pt-2 sm:pt-0 border-t border-slate-50 sm:border-0 text-left">
                   <div>
                     <span className="text-slate-500 block text-[10px]">Calls</span>
                     <span className="font-bold text-slate-800">{agent.callsCount}</span>

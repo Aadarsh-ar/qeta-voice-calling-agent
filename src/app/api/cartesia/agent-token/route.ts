@@ -5,7 +5,33 @@ export async function POST(req: Request) {
   if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 500 });
   try {
     const body = await req.json().catch(() => ({}));
-    const agentId: string = body.agentId || process.env.CARTESIA_AGENT_ID || "agent_GaiYMgB9Bj9kaKW1tUgqSQ";
+    const requestedId: string = (body.agentId || "").trim();
+    let resolvedCartesiaAgentId = "";
+
+    if (requestedId.startsWith("agent_")) {
+      resolvedCartesiaAgentId = requestedId;
+    } else if (requestedId) {
+      const { prisma } = await import("@/lib/db/prisma");
+      const dbAgent = await prisma.agent.findUnique({
+        where: { id: requestedId },
+        select: { cartesiaAgentId: true },
+      });
+      if (dbAgent?.cartesiaAgentId) {
+        resolvedCartesiaAgentId = dbAgent.cartesiaAgentId;
+      }
+    }
+
+    if (!resolvedCartesiaAgentId && process.env.CARTESIA_AGENT_ID) {
+      resolvedCartesiaAgentId = process.env.CARTESIA_AGENT_ID;
+    }
+
+    if (!resolvedCartesiaAgentId) {
+      return NextResponse.json(
+        { success: false, error: "Valid Cartesia Agent ID is required to generate connection token." },
+        { status: 400 }
+      );
+    }
+
     const res = await fetch("https://api.cartesia.ai/access-token", {
       method: "POST",
       headers: {
@@ -14,7 +40,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        grants: { "websocket:connect": { agent_id: agentId } },
+        grants: { "websocket:connect": { agent_id: resolvedCartesiaAgentId } },
         expires_in: 1800,
       }),
     });
@@ -23,10 +49,10 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       accessToken: d.access_token || d.token,
-      agentId,
+      agentId: resolvedCartesiaAgentId,
       expiresIn: 1800,
       cartesiaVersion: "2026-08-14",
-      wsUrl: "wss://api.cartesia.ai/agents/stream/" + agentId + "?cartesia_version=2026-08-14",
+      wsUrl: `wss://api.cartesia.ai/agents/stream/${resolvedCartesiaAgentId}?cartesia_version=2026-08-14&token=${d.access_token || d.token}`,
     });
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "error" }, { status: 500 });

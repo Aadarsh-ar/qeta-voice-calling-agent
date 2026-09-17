@@ -40,10 +40,22 @@ export function RealPhoneCallModal({
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [activeAgentId, setActiveAgentId] = useState(agentId || selectedAgentId || "");
   const [isCalling, setIsCalling] = useState(false);
-  const [callState, setCallState] = useState<"idle" | "dialing" | "ringing" | "connected" | "ended" | "carrier_check">("idle");
+  const [callState, setCallState] = useState<
+    | "idle"
+    | "dialing"
+    | "ringing"
+    | "answered"
+    | "connecting_audio"
+    | "agent_connecting"
+    | "agent_speaking"
+    | "listening"
+    | "ended"
+    | "carrier_check"
+  >("idle");
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [callDuration, setCallDuration] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState<string>("");
   const [carrierInfo, setCarrierInfo] = useState<{
     status?: string;
     reason?: string;
@@ -73,22 +85,54 @@ export function RealPhoneCallModal({
     }
   }, [isOpen, selectedAgentId, agentId]);
 
-  // Timer for connected call
+  // Section 2 & 18 & 19: Truthful Backend Call State Polling
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (callState === "connected") {
-      timer = setInterval(() => {
-        setCallDuration((prev) => prev + 1);
-      }, 1000);
+    if (!activeCallId || callState === "idle" || callState === "ended" || callState === "carrier_check") {
+      return;
     }
-    return () => clearInterval(timer);
-  }, [callState]);
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/calls/live-status?id=${encodeURIComponent(activeCallId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && data.state) {
+          const s = data.state;
+          if (s.lastTranscript) {
+            setLiveTranscript(s.lastTranscript);
+          }
+          if (s.stage === "GREETING_PLAYING" || s.stage === "AGENT_SPEAKING") {
+            setCallState("agent_speaking");
+          } else if (s.stage === "LISTENING") {
+            setCallState("listening");
+          } else if (s.stage === "CARTESIA_CONNECTED" || s.stage === "GREETING_GENERATING") {
+            setCallState("agent_connecting");
+          } else if (s.stage === "MEDIA_CONNECTED" || s.stage === "MEDIA_CONNECTING") {
+            setCallState("connecting_audio");
+          } else if (s.stage === "ANSWERED") {
+            setCallState("answered");
+          } else if (s.stage === "RINGING") {
+            setCallState("ringing");
+          } else if (s.stage === "ENDED" || !s.active) {
+            setCallState("ended");
+          }
+          if (s.durationSeconds !== undefined && s.durationSeconds > 0) {
+            setCallDuration(s.durationSeconds);
+          }
+        }
+      } catch {}
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeCallId, callState]);
 
   if (!isOpen) return null;
 
   const handleInitiateCall = async () => {
     setErrorMessage(null);
     setCarrierInfo(null);
+    setLiveTranscript("");
+    setCallDuration(0);
     if (!phoneNumber.trim()) {
       setErrorMessage("Please enter a valid 10-digit Indian phone number.");
       return;
@@ -121,10 +165,8 @@ export function RealPhoneCallModal({
           });
           setCallState("carrier_check");
         } else {
+          // Real telephony provider is now dialing - no fake timers!
           setCallState("ringing");
-          setTimeout(() => {
-            setCallState("connected");
-          }, 2200);
         }
       } else {
         setErrorMessage(data.error || "Failed to place call.");
@@ -157,29 +199,29 @@ export function RealPhoneCallModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center shrink-0">
               <PhoneCall className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Call Real Indian Phone</h3>
-              <p className="text-[11px] text-slate-500">Live PSTN Telephony via Vobiz Carrier Line (+91 80 7158 2667)</p>
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-slate-900 truncate">Call Real Indian Phone</h3>
+              <p className="text-[11px] text-slate-500 truncate">Live PSTN Telephony via Vobiz Line (+91 80 7158 2667)</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition"
+            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition shrink-0 ml-2"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
           {errorMessage && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -268,52 +310,134 @@ export function RealPhoneCallModal({
             </div>
           )}
 
-          {/* Active Call In Progress State */}
-          {(callState === "dialing" || callState === "ringing" || callState === "connected") && (
-            <div className="py-6 text-center space-y-5">
-              <div className="relative mx-auto w-20 h-20">
+          {/* Active Call In Progress State — Truthful lifecycle progression (Sections 2, 18, 19) */}
+          {callState !== "idle" && callState !== "ended" && callState !== "carrier_check" && (
+            <div className="py-4 text-center space-y-4">
+              <div className="relative mx-auto w-16 h-16">
                 <div
-                  className={`w-20 h-20 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-500 ${
-                    callState === "connected"
-                      ? "bg-emerald-500 animate-pulse"
-                      : "bg-indigo-600"
+                  className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 ${
+                    callState === "agent_speaking"
+                      ? "bg-emerald-500 scale-105 shadow-emerald-500/30"
+                      : callState === "listening"
+                      ? "bg-blue-600 ring-4 ring-blue-200"
+                      : "bg-indigo-600 animate-pulse"
                   }`}
                 >
-                  <PhoneCall className="w-8 h-8 animate-bounce" />
+                  <PhoneCall className={`w-7 h-7 ${callState === "agent_speaking" ? "animate-bounce" : ""}`} />
                 </div>
-                {callState === "connected" && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-400 border-2 border-white" />
+                {(callState === "agent_speaking" || callState === "listening") && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 border-2 border-white animate-ping" />
                 )}
               </div>
 
               <div className="space-y-1">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {callState === "dialing" && "Dialing Indian Phone Number..."}
-                  {callState === "ringing" && "Phone Ringing via Vobiz..."}
-                  {callState === "connected" && "Call Connected & Speaking"}
-                </span>
-                <h4 className="text-xl font-bold font-mono text-slate-900">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+                  {callState === "dialing" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                      Carrier Dialing PSTN...
+                    </>
+                  )}
+                  {callState === "ringing" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      Phone Ringing on Callee Device
+                    </>
+                  )}
+                  {callState === "answered" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      Customer Lifted Phone (Answered)
+                    </>
+                  )}
+                  {callState === "connecting_audio" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-spin" />
+                      Connecting Bidirectional Media Stream...
+                    </>
+                  )}
+                  {callState === "agent_connecting" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-purple-500 animate-spin" />
+                      Cartesia Agent Connecting...
+                    </>
+                  )}
+                  {callState === "agent_speaking" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      Cartesia Agent Speaking
+                    </>
+                  )}
+                  {callState === "listening" && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      Listening to Customer...
+                    </>
+                  )}
+                </div>
+
+                <h4 className="text-xl font-bold font-mono text-slate-900 pt-1">
                   🇮🇳 +91 {phoneNumber}
                 </h4>
                 <p className="text-xs text-slate-500">
-                  From Vobiz Line <span className="font-mono font-medium">+91 80 7158 2667</span>
+                  Via Vobiz Trunk <span className="font-mono font-medium">+91 80 7158 2667</span>
                 </p>
               </div>
 
-              {callState === "connected" && (
-                <div className="flex flex-col items-center gap-2">
+              {/* Call Duration only when media connected */}
+              {(callState === "agent_speaking" || callState === "listening") && (
+                <div className="flex flex-col items-center gap-1.5">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-mono font-bold">
                     <Clock className="w-3.5 h-3.5" />
                     {formatTimer(callDuration)}
                   </div>
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                    Office Ambience Sound Active
-                  </div>
+                  {liveTranscript && (
+                    <div className="max-w-md mx-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs text-left italic">
+                      <span className="font-semibold not-italic text-slate-900 block mb-0.5">Agent Speech:</span>
+                      &quot;{liveTranscript.slice(-120)}&quot;
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className="pt-4 flex justify-center">
+              {/* Section 19: Call Debug Timeline */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-left space-y-2">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  Call Debug Timeline (Live Diagnostics)
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+                  <div className="p-1.5 rounded-lg border flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Call Initiated</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${["ringing", "answered", "connecting_audio", "agent_connecting", "agent_speaking", "listening"].includes(callState) ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Ringing</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${["answered", "connecting_audio", "agent_connecting", "agent_speaking", "listening"].includes(callState) ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Answered</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${["connecting_audio", "agent_connecting", "agent_speaking", "listening"].includes(callState) ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Media Stream</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${["agent_connecting", "agent_speaking", "listening"].includes(callState) ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Cartesia WS</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${["agent_speaking", "listening"].includes(callState) ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Audio Delivered</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border flex items-center gap-1.5 ${callState === "listening" ? "bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold" : "bg-white text-slate-400 border-slate-200"}`}>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Conversational</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-center">
                 <button
                   type="button"
                   onClick={handleEndCall}

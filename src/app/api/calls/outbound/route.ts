@@ -54,6 +54,7 @@ export async function POST(req: Request) {
             status: dbAgent.status as any,
             systemPrompt: dbAgent.systemPrompt,
             businessContext: dbAgent.businessContext || "",
+            cartesiaAgentId: dbAgent.cartesiaAgentId || undefined,
             cartesiaVoiceId: dbAgent.cartesiaVoiceId || "ff480e6e-3e79-4307-9889-d1d9feb8e20e",
             cartesiaVoiceName: "AD (Cloned Telugu Voice)",
             cartesiaModel: dbAgent.cartesiaModel,
@@ -78,27 +79,115 @@ export async function POST(req: Request) {
         console.warn("Could not query DB for agent in outbound route:", dbErr);
       }
     }
+
+    // ─── Section 7: Strict Cartesia Agent Verification (No silent fallback!) ───
     if (!agent) {
-      agent = dataStore.getAgents()[0];
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Agent "${agentId || "unknown"}" not found in database. Cannot place call with unconfigured agent.`,
+        },
+        { status: 404 }
+      );
     }
-    const resolvedAgentId = agent?.id || agentId || "";
-    const agentName = agent?.name || "Telugu Sales Agent";
-    const outboundCallerId = "+918071582667";  // Purchased Vobiz DID (Karnataka)
+
+    const cartesiaApiKey = process.env.CARTESIA_API_KEY || "";
+    if (!cartesiaApiKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Cartesia API key (CARTESIA_API_KEY) is missing from environment. Telephony agent cannot initialize speech runtime.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const cartesiaAgentId = agent.cartesiaAgentId || process.env.CARTESIA_AGENT_ID;
+    if (!cartesiaAgentId || !cartesiaAgentId.startsWith("agent_")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Agent "${agent.name}" has no valid Cartesia Agent ID (found: "${cartesiaAgentId || 'none'}"). Please bind or sync a Cartesia agent first.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const resolvedAgentId = agent.id;
+    const agentName = agent.name;
+    const outboundCallerId = "+918071582667"; // Purchased Vobiz DID (Karnataka)
 
     // ─── Vobiz REST API credentials ──────────────────────────────────────
-    const vobizAuthId = process.env.VOBIZ_AUTH_ID || "";
-    const vobizAuthToken = process.env.VOBIZ_AUTH_TOKEN || "";
-    let webhookUrl = process.env.VOBIZ_WEBHOOK_URL || process.env.NEXT_PUBLIC_SERVER_URL || "";
+    let vobizAuthId = process.env.VOBIZ_AUTH_ID || "";
+    let vobizAuthToken = process.env.VOBIZ_AUTH_TOKEN || "";
+    let webhookUrl = process.env.PUBLIC_BASE_URL || process.env.VOBIZ_WEBHOOK_URL || process.env.NEXT_PUBLIC_SERVER_URL || "";
     try {
       const fs = await import("fs");
       const path = await import("path");
       const envPath = path.join(process.cwd(), ".env.local");
       if (fs.existsSync(envPath)) {
         const envContent = fs.readFileSync(envPath, "utf-8");
+        const mBase = envContent.match(/PUBLIC_BASE_URL=([^\r\n]+)/);
+        if (mBase && mBase[1]) webhookUrl = mBase[1].replace(/["']/g, "").trim();
         const m = envContent.match(/VOBIZ_WEBHOOK_URL=([^\r\n]+)/);
-        if (m && m[1]) webhookUrl = m[1].replace(/["']/g, "").trim();
+        if (m && m[1] && !webhookUrl) webhookUrl = m[1].replace(/["']/g, "").trim();
+        const mAuth = envContent.match(/VOBIZ_AUTH_ID=([^\r\n]+)/);
+        if (mAuth && mAuth[1] && !vobizAuthId) vobizAuthId = mAuth[1].replace(/["']/g, "").trim();
+        const mTok = envContent.match(/VOBIZ_AUTH_TOKEN=([^\r\n]+)/);
+        if (mTok && mTok[1] && !vobizAuthToken) vobizAuthToken = mTok[1].replace(/["']/g, "").trim();
       }
     } catch {}
+
+    webhookUrl = webhookUrl.replace(/\/+$/, "");
+
+    // ─── Section 12: Pre-Call Readiness Check ─────────────────────────────
+    if (!vobizAuthId || !vobizAuthToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Telephony provider credentials (VOBIZ_AUTH_ID / VOBIZ_AUTH_TOKEN) are missing. Cannot dispatch call.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!webhookUrl || webhookUrl.includes("localhost") || webhookUrl.includes("127.0.0.1") || !webhookUrl.startsWith("http")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `PUBLIC_BASE_URL is invalid or pointing to localhost (${webhookUrl || 'empty'}). Cloud carrier requires a publicly accessible HTTPS URL.`,
+        },
+        { status: 500 }
+      );
+    }
+
+    // Ping the webhook domain to verify reachability and avoid 502 Bad Gateway calls
+    try {
+      const pingController = new AbortController();
+      const pingTimeout = setTimeout(() => pingController.abort(), 2500);
+      const pingRes = await fetch(`${webhookUrl}/api/vobiz/call-status`, {
+        method: "GET",
+        signal: pingController.signal,
+      });
+      clearTimeout(pingTimeout);
+      if (!pingRes.ok && pingRes.status >= 500) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Public base URL (${webhookUrl}) returned HTTP ${pingRes.status} (Gateway Error). Carrier will not be able to connect audio.`,
+          },
+          { status: 502 }
+        );
+      }
+    } catch (pingErr: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Public base URL (${webhookUrl}) is unreachable (${pingErr.message}). Verify your public domain or tunnel is running.`,
+        },
+        { status: 502 }
+      );
+    }
 
     const callNumber = `#${Math.floor(10000 + Math.random() * 90000)}`;
     const callId = `call_${Date.now()}`;
@@ -174,10 +263,16 @@ export async function POST(req: Request) {
       id: callId,
       callNumber,
       callerNumber: cleanNumber,
-      agentId: agent?.id || "agent_telugu_sales",
+      agentId: agent.id,
       agentName,
       direction: CallDirection.OUTBOUND,
-      status: CallStatus.ACTIVE,
+      status: telephonyStatus === "FAILED" ? CallStatus.FAILED : CallStatus.INITIALIZING,
+      stage: telephonyStatus === "FAILED" ? "FAILED" : "RINGING",
+      vobizCallId,
+      cartesiaAgentId,
+      lastSuccessfulStage: telephonyStatus === "FAILED" ? "FAILED" : "TELEPHONY_CREATED",
+      mediaConnected: false,
+      cartesiaConnected: false,
       startedAt: new Date().toISOString(),
       durationSeconds: 0,
       language: "Telugu + English",

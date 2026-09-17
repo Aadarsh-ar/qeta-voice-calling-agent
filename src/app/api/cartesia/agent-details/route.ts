@@ -4,9 +4,29 @@ export async function GET(req: Request) {
   const apiKey = process.env.CARTESIA_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 500 });
   const url = new URL(req.url);
-  const agentId = url.searchParams.get("agentId") || process.env.CARTESIA_AGENT_ID || "agent_GaiYMgB9Bj9kaKW1tUgqSQ";
+  let resolvedAgentId = (url.searchParams.get("agentId") || "").trim();
+
+  if (resolvedAgentId && !resolvedAgentId.startsWith("agent_")) {
+    const { prisma } = await import("@/lib/db/prisma");
+    const dbA = await prisma.agent.findUnique({
+      where: { id: resolvedAgentId },
+      select: { cartesiaAgentId: true },
+    });
+    if (dbA?.cartesiaAgentId) {
+      resolvedAgentId = dbA.cartesiaAgentId;
+    }
+  }
+
+  if (!resolvedAgentId && process.env.CARTESIA_AGENT_ID) {
+    resolvedAgentId = process.env.CARTESIA_AGENT_ID;
+  }
+
+  if (!resolvedAgentId) {
+    return NextResponse.json({ error: "Valid Cartesia agentId is required" }, { status: 400 });
+  }
+
   try {
-    const res = await fetch("https://api.cartesia.ai/v1/agents/" + agentId, {
+    const res = await fetch("https://api.cartesia.ai/v1/agents/" + resolvedAgentId, {
       headers: {
         Authorization: "Bearer " + apiKey,
         "X-API-Key": apiKey,
@@ -18,11 +38,17 @@ export async function GET(req: Request) {
     return NextResponse.json({
       success: true,
       agent: {
-        id: d.id, name: d.name, description: d.description,
+        id: d.id,
+        name: d.name,
+        description: d.description,
+        instructions: d.config?.instructions || "",
+        initialMessage: d.config?.initial_message || "",
         voiceId: d.config?.audio?.output?.voice_id,
         language: d.config?.language?.primary,
         model: d.config?.model?.id,
-        initialMessage: d.config?.initial_message,
+        temperature: d.config?.model?.temperature ?? null,
+        maxOutputTokens: d.config?.model?.max_output_tokens ?? null,
+        noiseSuppression: d.config?.audio?.input?.noise_suppression ?? "auto",
         hasBackgroundSound: Boolean(d.config?.audio?.output?.background_sound?.file_id),
         backgroundSoundVolume: d.config?.audio?.output?.background_sound?.volume ?? null,
         systemTools: d.config?.system_tools ?? {},
