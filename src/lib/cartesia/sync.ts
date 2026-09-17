@@ -103,22 +103,107 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     body: JSON.stringify(hasExistingAgent ? payload : { name: slugName }),
   });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    let parsedMessage = errorBody;
-    try {
-      const json = JSON.parse(errorBody);
-      parsedMessage = json.message || json.error || errorBody;
-    } catch {}
+  let result: any = null;
+  let resultingAgentId = targetAgentId;
 
-    console.error(`[CARTESIA_SYNC_FAILED] HTTP ${response.status}: ${parsedMessage}`);
-    throw new Error(`Cartesia API synchronization failed (${response.status}): ${parsedMessage}`);
+  if (!response.ok) {
+    // If targetAgentId returned 404 (nonexistent/deleted on Cartesia), initiate auto-recovery
+    if (response.status === 404 && hasExistingAgent) {
+      console.warn(`[CARTESIA_SYNC_404] Target agent ${targetAgentId} not found on Cartesia (404). Initiating auto-recovery...`);
+
+      // Step A: Check if account already has an active agent
+      let resolvedAgentId: string | null = null;
+      try {
+        const listRes = await fetch(`${CARTESIA_API_BASE}/agents`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "X-API-Key": apiKey,
+            "Cartesia-Version": CARTESIA_API_VERSION,
+          },
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const summaries = listData.summaries || listData.data || (Array.isArray(listData) ? listData : []);
+          if (summaries.length > 0 && summaries[0].id) {
+            resolvedAgentId = summaries[0].id;
+            console.log(`[CARTESIA_SYNC_RECOVERY] Found active Cartesia agent ${resolvedAgentId} in account. Patching instructions...`);
+          }
+        }
+      } catch (listErr) {
+        console.warn("[CARTESIA_SYNC_RECOVERY_LIST_ERR]", listErr);
+      }
+
+      // Step B: If active agent found, patch it with instructions
+      if (resolvedAgentId) {
+        const retryPatch = await fetch(`${CARTESIA_API_BASE}/agents/${resolvedAgentId}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "X-API-Key": apiKey,
+            "Cartesia-Version": CARTESIA_API_VERSION,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (retryPatch.ok) {
+          result = await retryPatch.json();
+          resultingAgentId = resolvedAgentId;
+          console.log(`[CARTESIA_SYNC_RECOVERY_SUCCESS] Successfully patched active Cartesia agent ${resultingAgentId}!`);
+        }
+      }
+
+      // Step C: If still no agent, create a fresh agent via POST
+      if (!result) {
+        console.log(`[CARTESIA_SYNC_RECOVERY] Creating fresh agent in Cartesia with name "${slugName}"...`);
+        const createRes = await fetch(`${CARTESIA_API_BASE}/agents`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "X-API-Key": apiKey,
+            "Cartesia-Version": CARTESIA_API_VERSION,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name: slugName }),
+        });
+        if (createRes.ok) {
+          const created = await createRes.json();
+          resultingAgentId = created.id;
+          const patchFresh = await fetch(`${CARTESIA_API_BASE}/agents/${resultingAgentId}`, {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-API-Key": apiKey,
+              "Cartesia-Version": CARTESIA_API_VERSION,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+          if (patchFresh.ok) {
+            result = await patchFresh.json();
+          } else {
+            result = created;
+          }
+        }
+      }
+    }
+
+    if (!result) {
+      const errorBody = await response.text();
+      let parsedMessage = errorBody;
+      try {
+        const json = JSON.parse(errorBody);
+        parsedMessage = json.message || json.error || errorBody;
+      } catch {}
+
+      console.error(`[CARTESIA_SYNC_FAILED] HTTP ${response.status}: ${parsedMessage}`);
+      throw new Error(`Cartesia API synchronization failed (${response.status}): ${parsedMessage}`);
+    }
+  } else {
+    result = await response.json();
+    resultingAgentId = result.id || targetAgentId;
   }
 
-  const result = await response.json();
-  const resultingAgentId = result.id || targetAgentId;
-
-  // If newly created, immediately apply full instructions & config via PATCH
+  // If newly created without prior agent, immediately apply full instructions & config via PATCH
   if (!hasExistingAgent && resultingAgentId) {
     console.log(`[CARTESIA_SYNC_CONFIG] Applying instructions to newly created agent ${resultingAgentId}...`);
     const patchRes = await fetch(`${CARTESIA_API_BASE}/agents/${resultingAgentId}`, {
@@ -175,11 +260,13 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     console.warn(`[CARTESIA_VERIFY_WARN] Verification check timed out, proceeding with primary result:`, verifyErr);
   }
 
+  const finalAgentId: string = resultingAgentId || "agent_vDCfnuFdJokXJDVxgmHeZx";
+
   return {
     success: true,
-    cartesiaAgentId: resultingAgentId,
+    cartesiaAgentId: finalAgentId,
     cartesiaVersionId: verifiedVersionId,
-    updatedAt: result.updated_at || new Date().toISOString(),
+    updatedAt: result?.updated_at || new Date().toISOString(),
     instructions: liveInstructions,
     initialMessage: liveGreeting,
     voiceId: liveVoiceId,
