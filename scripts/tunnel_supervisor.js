@@ -13,9 +13,11 @@ let healthCheckInterval = null;
 function updateEnv(url) {
   if (!url || !existsSync(envPath)) return;
   let content = readFileSync(envPath, "utf-8");
+  content = content.replace(/PUBLIC_BASE_URL=.*/g, `PUBLIC_BASE_URL=${url}`);
   content = content.replace(/VOBIZ_WEBHOOK_URL=.*/g, `VOBIZ_WEBHOOK_URL=${url}`);
   content = content.replace(/NEXT_PUBLIC_SERVER_URL=.*/g, `NEXT_PUBLIC_SERVER_URL=${url}`);
   writeFileSync(envPath, content, "utf-8");
+  process.env.PUBLIC_BASE_URL = url;
   process.env.VOBIZ_WEBHOOK_URL = url;
   process.env.NEXT_PUBLIC_SERVER_URL = url;
   console.log(`[TUNNEL_SUPERVISOR] Updated .env.local with active URL: ${url}`);
