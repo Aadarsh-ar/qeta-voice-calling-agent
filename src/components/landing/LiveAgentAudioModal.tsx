@@ -182,11 +182,11 @@ export function LiveAgentAudioModal({ isOpen, onClose, onOpenFullTest }: LiveAge
           </div>
 
           <p className="font-heading text-lg font-bold text-slate-900 leading-snug mb-2">
-            "{currentSnippet.teluguText}"
+            &ldquo;{currentSnippet.teluguText}&rdquo;
           </p>
 
           <p className="text-xs text-slate-500 italic">
-            "{currentSnippet.englishTranslation}"
+            &ldquo;{currentSnippet.englishTranslation}&rdquo;
           </p>
 
           {/* Player Button & Equalizer */}

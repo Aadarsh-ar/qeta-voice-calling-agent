@@ -56,12 +56,12 @@ export function RealPhoneCallModal({
   useEffect(() => {
     if (isOpen) {
       const targetAgentId = selectedAgentId || agentId;
-      if (targetAgentId) {
-        setActiveAgentId(targetAgentId);
-      }
       fetch("/api/agents")
         .then((r) => r.json())
         .then((d) => {
+          if (targetAgentId) {
+            setActiveAgentId(targetAgentId);
+          }
           if (d.success && Array.isArray(d.agents)) {
             setAgents(d.agents);
             if (!targetAgentId && d.agents.length > 0) {

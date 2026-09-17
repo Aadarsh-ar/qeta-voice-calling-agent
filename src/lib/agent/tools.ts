@@ -270,7 +270,7 @@ export async function executeToolCall(
     case "get_order_status":
     case "check_order_status": {
       const rawInput = String(args.orderId || args.id || "").trim();
-      let rawId = rawInput.toUpperCase();
+      const rawId = rawInput.toUpperCase();
       
       const phone = String(args.customerPhone || "").trim();
       let order = rawId ? ORDERS_DB.get(rawId) || ORDERS_DB.get(rawInput) : undefined;
