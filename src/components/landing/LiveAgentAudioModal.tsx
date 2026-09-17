@@ -67,7 +67,6 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const isActiveRef = useRef(false);
   const messagesRef = useRef<Message[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -98,13 +97,6 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
   }, []);
 
   const stopAudio = useCallback(() => {
-    if (audioPlayerRef.current) {
-      try {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current.currentTime = 0;
-      } catch {}
-      audioPlayerRef.current = null;
-    }
     if (currentSourceRef.current) {
       try {
         currentSourceRef.current.stop();
@@ -199,62 +191,6 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
         resolve();
       }
     });
-  };
-
-  // Plays synthesized audio via HTML5 Audio with WAV dataUrl or PCM fallback
-  const playSynthesizedAudio = async (audioDataUrl?: string | null, fallbackBase64?: string | null): Promise<void> => {
-    isAgentSpeakingRef.current = true;
-    stopMic();
-    if (echoGuardTimerRef.current) {
-      clearTimeout(echoGuardTimerRef.current);
-      echoGuardTimerRef.current = null;
-    }
-
-    if (audioDataUrl) {
-      return new Promise((resolve) => {
-        try {
-          stopAudio();
-          const audio = new Audio(audioDataUrl);
-          audioPlayerRef.current = audio;
-          audio.onended = () => {
-            audioPlayerRef.current = null;
-            echoGuardTimerRef.current = setTimeout(() => {
-              isAgentSpeakingRef.current = false;
-              resolve();
-            }, 350);
-          };
-          audio.onerror = () => {
-            audioPlayerRef.current = null;
-            if (fallbackBase64) {
-              playPcmAudio(fallbackBase64).then(resolve);
-            } else {
-              isAgentSpeakingRef.current = false;
-              resolve();
-            }
-          };
-          audio.play().catch(() => {
-            if (fallbackBase64) {
-              playPcmAudio(fallbackBase64).then(resolve);
-            } else {
-              isAgentSpeakingRef.current = false;
-              resolve();
-            }
-          });
-        } catch {
-          if (fallbackBase64) {
-            playPcmAudio(fallbackBase64).then(resolve);
-          } else {
-            isAgentSpeakingRef.current = false;
-            resolve();
-          }
-        }
-      });
-    } else if (fallbackBase64) {
-      return playPcmAudio(fallbackBase64);
-    } else {
-      isAgentSpeakingRef.current = false;
-      return Promise.resolve();
-    }
   };
 
   // Browser Web Speech fallback with the same echo guard
@@ -414,8 +350,8 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
       setState("speaking");
 
       // Play synthesized audio directly (single turn)
-      if (data.audioDataUrl || data.audioBase64) {
-        await playSynthesizedAudio(data.audioDataUrl, data.audioBase64);
+      if (data.audioBase64) {
+        await playPcmAudio(data.audioBase64);
       } else {
         await playBrowserSpeech(reply);
       }
@@ -529,8 +465,8 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
 
       if (!isActiveRef.current) return;
 
-      if (data.audioDataUrl || data.audioBase64) {
-        await playSynthesizedAudio(data.audioDataUrl, data.audioBase64);
+      if (data.audioBase64) {
+        await playPcmAudio(data.audioBase64);
       } else {
         await playBrowserSpeech(selectedAgent.greeting);
       }
@@ -588,7 +524,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 </span>
               </h3>
               <p className="text-[11px] text-slate-500">
-                {isOnCall ? `Active Call: Harika Madam (College Attendance)` : "Harika (Native Telugu Voice) • Cartesia Sonic-3.6"}
+                {isOnCall ? `Active Call: ${selectedAgent.name} (${selectedAgent.voiceName})` : "Select Harika Voice (College) or AD Voice (ABC)"}
               </p>
             </div>
           </div>
@@ -615,35 +551,88 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
           </div>
         </div>
 
-        {/* ─── HARIKA VOICE AGENT SHOWCASE CARD (When Idle) ─── */}
+        {/* ─── LIVE AGENT SWITCHER (AVAILABLE WHILE TALKING) ─── */}
+        {isOnCall && (
+          <div className="px-4 py-2 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Radio className="w-3 h-3 text-emerald-600 animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 hidden sm:inline">
+                Live Agent:
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-1 justify-end">
+              {AGENTS.map((ag) => {
+                const isSelected = selectedAgent.id === ag.id;
+                return (
+                  <button
+                    key={ag.id}
+                    type="button"
+                    onClick={() => switchAgentDuringCall(ag)}
+                    title={`Switch to ${ag.name} (${ag.voiceName})`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
+                      isSelected
+                        ? "bg-emerald-700 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20"
+                        : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>{ag.emoji}</span>
+                    <span className="text-[11px] font-bold truncate">{ag.name}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                      isSelected ? "bg-emerald-800 text-emerald-100" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {ag.voiceName}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ─── AGENT SELECTOR & EXPLICIT START SECTION (When Idle) ─── */}
         {state === "idle" && (
           <div className="px-5 pt-4 pb-4 shrink-0 bg-slate-50/70 border-b border-slate-100 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Active Telephony Voice Agent
+                1. Select an Agent
               </span>
-              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                Cartesia Sonic-3.6 Active
-              </span>
+              <span className="text-[10px] text-slate-400">2 Independent Voice Agents</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl border-2 border-emerald-500 bg-white shadow-sm ring-2 ring-emerald-500/20 relative">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-2xl">🎓</span>
-                  <div>
-                    <div className="font-heading text-xs font-bold text-slate-900 leading-tight">
-                      {selectedAgent.name}
-                    </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
-                      {selectedAgent.role}
-                    </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {AGENTS.map((ag) => (
+                <button
+                  key={ag.id}
+                  onClick={() => setSelectedAgent(ag)}
+                  className={`p-3 rounded-2xl border-2 text-left transition-all relative ${
+                    selectedAgent.id === ag.id
+                      ? "border-emerald-500 bg-white shadow-sm ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-white/70 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-2xl">{ag.emoji}</span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                      ag.voiceName.includes("Harika")
+                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                        : "bg-blue-50 text-blue-700 border-blue-200"
+                    }`}>
+                      {ag.voiceName}
+                    </span>
                   </div>
-                </div>
-                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  Harika (Telugu)
-                </span>
-              </div>
+                  <div className="font-heading text-xs font-bold text-slate-900 leading-tight">
+                    {ag.name}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 leading-snug line-clamp-1">
+                    {ag.role}
+                  </div>
+                  {selectedAgent.id === ag.id && (
+                    <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-emerald-600 flex items-center justify-center">
+                      <CheckCircle2 className="w-3 h-3 text-white" />
+                    </div>
+                  )}
+                </button>
+              ))}
             </div>
 
             {/* ── PROMINENT START BUTTON RIGHT BELOW AGENT SELECTION ── */}
@@ -654,7 +643,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 className="w-full flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.99] group"
               >
                 <Play className="w-4 h-4 fill-current transition-transform group-hover:scale-110" />
-                <span>Start Live Conversation with Harika Madam</span>
+                <span>Start Conversation with {selectedAgent.name} ({selectedAgent.voiceName})</span>
                 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
               </button>
             </div>
