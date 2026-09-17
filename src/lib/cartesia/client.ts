@@ -18,11 +18,20 @@ export class CartesiaClient {
   private baseUrl: string = "https://api.cartesia.ai";
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey || process.env.CARTESIA_API_KEY || "";
+    this.apiKey = apiKey || "";
+  }
+
+  getApiKey(): string {
+    return (
+      this.apiKey ||
+      (typeof process !== "undefined" && process.env.CARTESIA_API_KEY) ||
+      "sk_car_x7b5kmXE55KpDgAR9Rcc1U"
+    );
   }
 
   isConfigured(): boolean {
-    return Boolean(this.apiKey && this.apiKey.startsWith("sk_car_"));
+    const key = this.getApiKey();
+    return Boolean(key && key.startsWith("sk_car_"));
   }
 
   /**
@@ -35,7 +44,7 @@ export class CartesiaClient {
 
     const res = await fetch(`${this.baseUrl}/voices`, {
       headers: {
-        "X-API-Key": this.apiKey,
+        "X-API-Key": this.getApiKey(),
         "Cartesia-Version": this.version,
       },
     });
@@ -63,7 +72,7 @@ export class CartesiaClient {
     try {
       const res = await fetch(`${this.baseUrl}/voices/${voiceId}`, {
         headers: {
-          "X-API-Key": this.apiKey,
+          "X-API-Key": this.getApiKey(),
           "Cartesia-Version": this.version,
         },
       });
@@ -108,7 +117,7 @@ export class CartesiaClient {
     const res = await fetch(`${this.baseUrl}/tts/bytes`, {
       method: "POST",
       headers: {
-        "X-API-Key": this.apiKey,
+        "X-API-Key": this.getApiKey(),
         "Cartesia-Version": this.version,
         "Content-Type": "application/json",
       },

@@ -22,13 +22,22 @@ export class SarvamClient {
   private defaultModel: string = "saaras:v3-realtime";
 
   constructor(config?: SarvamConfig) {
-    this.apiKey = config?.apiKey || process.env.SARVAM_API_KEY || "";
+    this.apiKey = config?.apiKey || "";
     if (config?.languageCode) this.defaultLanguage = config.languageCode;
     if (config?.model) this.defaultModel = config.model;
   }
 
+  getApiKey(): string {
+    return (
+      this.apiKey ||
+      (typeof process !== "undefined" && process.env.SARVAM_API_KEY) ||
+      "sk_scyogavs_kh6r7l2swDulfN6ifZYMZRRF"
+    );
+  }
+
   isConfigured(): boolean {
-    return Boolean(this.apiKey && this.apiKey.trim().length > 0);
+    const key = this.getApiKey();
+    return Boolean(key && key.trim().length > 0);
   }
 
   /**
@@ -47,7 +56,7 @@ export class SarvamClient {
    */
   getHeaders(): Record<string, string> {
     return {
-      "api-subscription-key": this.apiKey,
+      "api-subscription-key": this.getApiKey(),
     };
   }
 

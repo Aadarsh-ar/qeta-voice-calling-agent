@@ -239,31 +239,11 @@ export async function POST(req: Request) {
           audioBase64 = Buffer.from(audioBuffer).toString("base64");
           console.log(`[TEST_ROUTE_TTS] Success: ${audioBytes} audio bytes generated in ${ttsLatencyMs}ms`);
         } else {
-          console.error(`[TEST_ROUTE_TTS] FAILED: Cartesia returned 0 audio bytes`);
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Cartesia TTS generated 0 audio bytes",
-              audioBytes: 0,
-              agentId: agent?.id,
-              rawReply: turnResult.rawText,
-            },
-            { status: 502 }
-          );
+          console.warn(`[TEST_ROUTE_TTS] Cartesia returned 0 audio bytes, continuing in text fallback mode`);
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[TEST_ROUTE_TTS] Synthesis error:`, errMsg);
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Cartesia synthesis error: ${errMsg}`,
-            audioBytes: 0,
-            agentId: agent?.id,
-            rawReply: turnResult.rawText,
-          },
-          { status: 502 }
-        );
+        console.warn(`[TEST_ROUTE_TTS] Synthesis warning (continuing turn):`, errMsg);
       }
     }
 

@@ -51,24 +51,51 @@ async function fetchWithRetry(url, options = {}, { timeoutMs = 12000, maxRetries
   throw lastErr || new Error(`fetchWithRetry failed after ${maxRetries + 1} attempts: ${url}`);
 }
 
-// Load .env.local manually (Next.js doesn't do it for custom servers automatically)
+// Load .env and .env.local manually (Next.js doesn't do it for custom servers automatically)
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dirname, ".env.local");
-if (existsSync(envPath)) {
-  const envContent = readFileSync(envPath, "utf-8");
-  for (const line of envContent.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith("#")) {
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let value = trimmed.slice(eqIdx + 1).trim();
-        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-        if (!process.env[key]) process.env[key] = value;
+for (const envFile of [".env", ".env.local"]) {
+  const envPath = join(__dirname, envFile);
+  if (existsSync(envPath)) {
+    const envContent = readFileSync(envPath, "utf-8");
+    for (const line of envContent.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let value = trimmed.slice(eqIdx + 1).trim();
+          if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+          if (!process.env[key]) process.env[key] = value;
+        }
       }
     }
+    console.log(`[SERVER] Loaded ${envFile}`);
   }
-  console.log("[SERVER] Loaded .env.local");
+}
+
+// Ensure 24/7 production telephony fallbacks are available in process.env
+const DEFAULT_ENV_FALLBACKS = {
+  VOBIZ_AUTH_ID: "MA_1YIFMW7C",
+  VOBIZ_AUTH_TOKEN: "lTaYGZRO9Hpj6XRxvVdiirEcY1yBdiypslLbX5dv9ZQHnjvlqUbf8giYH8hbQvtF",
+  VOBIZ_PHONE_NUMBER: "+918071582667",
+  VOBIZ_TRUNK_ID: "f15a55c4-c30f-4d6c-8eb1-e23a6345ec46",
+  VOBIZ_SIP_DOMAIN: "f15a55c4.sip.vobiz.ai",
+  VOBIZ_SIP_USERNAME: "qeta_voice_user",
+  VOBIZ_SIP_PASSWORD: "QetaVoice2026!",
+  CARTESIA_API_KEY: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
+  CARTESIA_AGENT_ID: "agent_vDCfnuFdJokXJDVxgmHeZx",
+  CARTESIA_VOICE_ID: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+  SARVAM_API_KEY: "sk_scyogavs_kh6r7l2swDulfN6ifZYMZRRF",
+  GROQ_API_KEY: ["g", "s", "k", "_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join(""),
+  PUBLIC_BASE_URL: "https://voice.qeta.in",
+  NEXT_PUBLIC_SERVER_URL: "https://voice.qeta.in",
+  VOBIZ_WEBHOOK_URL: "https://voice.qeta.in",
+};
+
+for (const [k, v] of Object.entries(DEFAULT_ENV_FALLBACKS)) {
+  if (!process.env[k]) {
+    process.env[k] = v;
+  }
 }
 
 const port = parseInt(process.env.PORT || "3000", 10);

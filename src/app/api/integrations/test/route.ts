@@ -119,8 +119,10 @@ export async function POST(req: Request) {
 
     // 4. VOBIZ TELEPHONY TEST
     if (prov === "VOBIZ") {
-      const authId = apiKey || process.env.VOBIZ_AUTH_ID;
-      const authToken = secret || process.env.VOBIZ_AUTH_TOKEN;
+      const { getTelephonyConfig } = await import("@/lib/config/telephony");
+      const telConfig = getTelephonyConfig();
+      const authId = apiKey || telConfig.vobizAuthId;
+      const authToken = secret || telConfig.vobizAuthToken;
 
       if (!authId || !authToken) {
         return NextResponse.json({
