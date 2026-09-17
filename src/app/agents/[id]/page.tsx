@@ -25,7 +25,6 @@ import {
   MessageSquare,
   HelpCircle,
   RefreshCw,
-  ArrowDownToLine,
   ArrowUpToLine,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
@@ -473,8 +472,8 @@ export default function AgentDetailPage({
     }
   };
 
-  // Render unified save button with Section 18 progression: Saving... -> Syncing with Cartesia... -> Ready
-  const renderSaveButton = (label: string = "Save Changes") => (
+  // Render unified save button with Section 18 progression: Saving... -> Updating... -> Saved
+  const renderSaveButton = (label: string = "Save") => (
     <button
       onClick={handleSaveAll}
       disabled={isSaving}
@@ -497,7 +496,7 @@ export default function AgentDetailPage({
       ) : saveStep === "ready" ? (
         <>
           <CheckCircle2 className="w-3.5 h-3.5" />
-          Ready
+          Saved
         </>
       ) : (
         <>
@@ -751,7 +750,7 @@ export default function AgentDetailPage({
                   <h4 className="text-sm font-bold text-slate-900">Agent Details</h4>
                   <p className="text-xs text-slate-500">Name, description, and assigned phone line.</p>
                 </div>
-                {renderSaveButton("Save Agent")}
+                {renderSaveButton("Save")}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
@@ -868,35 +867,15 @@ export default function AgentDetailPage({
           {/* Instructions & Training Tab */}
           {activeTab === "instructions" && (
             <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-bold text-slate-900">Agent Persona & Core Instructions</h4>
-                    {cartesiaAgentId && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Cartesia: {cartesiaAgentId}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Live instructions executed on Cartesia during phone calls. Saving updates Cartesia in real time.
+                  <h4 className="text-sm font-bold text-slate-900">Agent Persona & Core Instructions</h4>
+                  <p className="text-xs text-slate-500">
+                    Define agent identity, tone, guidelines, and specific telephone behavior.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSyncDirection("pull")}
-                    disabled={isSyncingDrift === "pull"}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition disabled:opacity-50"
-                    title="Fetch and match live instructions from Cartesia"
-                  >
-                    <ArrowDownToLine className={`w-3.5 h-3.5 text-indigo-600 ${isSyncingDrift === "pull" ? "animate-bounce" : ""}`} />
-                    {isSyncingDrift === "pull" ? "Fetching..." : "Fetch from Cartesia"}
-                  </button>
-                  {renderSaveButton("Save & Sync to Cartesia")}
-                </div>
+                {renderSaveButton("Save")}
               </div>
 
               {/* System Prompt Input */}
@@ -1053,7 +1032,7 @@ export default function AgentDetailPage({
                   <h4 className="text-sm font-bold text-slate-900">Agent Tools</h4>
                   <p className="text-xs text-slate-500">Toggle automated actions your agent can perform during calls.</p>
                 </div>
-                {renderSaveButton("Save Tools")}
+                {renderSaveButton("Save")}
               </div>
 
               <div className="space-y-2.5">
