@@ -27,7 +27,7 @@ export default function DashboardPage() {
   const [calls, setCalls] = useState<CallItem[]>(dataStore.getCalls().slice(0, 5));
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [isRealCallOpen, setIsRealCallOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string } | undefined>();
+  const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string; cartesiaVoiceId?: string } | undefined>();
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -55,8 +55,8 @@ export default function DashboardPage() {
   const totalMinutes = agents.reduce((acc, a) => acc + (a.totalMinutes || 0), 0) || 18.4;
   const activeAgent = agents.find((a) => a.status === "ACTIVE") || agents[0];
 
-  const handleOpenTest = (agent?: { id: string; name: string }) => {
-    setSelectedAgent(agent || (activeAgent ? { id: activeAgent.id, name: activeAgent.name } : undefined));
+  const handleOpenTest = (agent?: { id: string; name: string; cartesiaVoiceId?: string }) => {
+    setSelectedAgent(agent || (activeAgent ? { id: activeAgent.id, name: activeAgent.name, cartesiaVoiceId: activeAgent.cartesiaVoiceId } : undefined));
     setIsTestModalOpen(true);
   };
 

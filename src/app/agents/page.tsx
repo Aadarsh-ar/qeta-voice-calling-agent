@@ -23,7 +23,7 @@ import { dataStore, AgentItem } from "@/lib/db/store";
 export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentItem[]>(dataStore.getAgents());
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string } | undefined>();
+  const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string; cartesiaVoiceId?: string } | undefined>();
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<{ id: string; name: string } | null>(null);

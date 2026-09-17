@@ -303,17 +303,19 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
 
       recognition.onerror = (e: any) => {
         if (e.error === "no-speech") {
-          if (isActiveRef.current && state === "listening" && !isAgentSpeakingRef.current) {
-            try { recognition.start(); } catch {}
-          }
+          // Normal silence pause — ignore and let onend restart cleanly
+          return;
         } else if (e.error === "not-allowed") {
           setError("Microphone access blocked. You can type your message below!");
         }
       };
 
       recognition.onend = () => {
-        if (isActiveRef.current && state === "listening" && !isAgentSpeakingRef.current) {
-          // Restart if needed
+        // Continuous listening: auto-restart whenever call is active and agent isn't outputting audio
+        if (isActiveRef.current && !isAgentSpeakingRef.current) {
+          try {
+            recognition.start();
+          } catch {}
         }
       };
 
@@ -321,7 +323,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     } catch (err) {
       console.warn("[LiveAgentModal] SpeechRecognition error:", err);
     }
-  }, [sttLang, state]);
+  }, [sttLang]);
 
   // Executes a single turn: user input -> Cartesia LLM response -> play audio -> resume listening
   const handleUserMessage = async (userText: string) => {

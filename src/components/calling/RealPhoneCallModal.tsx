@@ -284,7 +284,11 @@ export function RealPhoneCallModal({
                   </div>
                   <div>
                     <span className="text-slate-400 block">Voice Engine:</span>
-                    <span className="font-semibold text-indigo-600">AD (Telugu Cloned Voice)</span>
+                    <span className="font-semibold text-indigo-600">
+                      {agents.find((a) => a.id === activeAgentId)?.name?.toLowerCase().includes("college")
+                        ? "Harika (Telugu Faculty Voice)"
+                        : "AD (Telugu Cloned Voice)"}
+                    </span>
                   </div>
                 </div>
               </div>

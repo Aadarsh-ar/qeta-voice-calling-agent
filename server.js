@@ -197,7 +197,7 @@ function calculateRms(mulawBuffer) {
   return Math.sqrt(sum / mulawBuffer.length);
 }
 
-let sarvamQuotaExhaustedUntil = 0;
+let sarvamQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000; // Auto-bypass exhausted Sarvam 402 to ultra-fast Whisper
 
 async function transcribeAudio(mulawBuffer) {
   const pcm16 = mulawToPcm16(mulawBuffer);
@@ -241,8 +241,8 @@ async function transcribeAudio(mulawBuffer) {
       } else if (res) {
         const errText = await res.text();
         if (res.status === 402) {
-          sarvamQuotaExhaustedUntil = Date.now() + 15 * 60 * 1000;
-          console.warn(`[STT_NOTICE] Sarvam credit quota exhausted (402). Auto-switching to high-accuracy Whisper Turbo for 15 mins.`);
+          sarvamQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000;
+          console.warn(`[STT_NOTICE] Sarvam credit quota exhausted (402). Auto-switching to high-accuracy Whisper Turbo.`);
         } else {
           console.warn(`[ERROR] Sarvam STT returned ${res.status}: ${errText.slice(0, 160)}`);
         }
@@ -255,15 +255,16 @@ async function transcribeAudio(mulawBuffer) {
   // Resilient Whisper Turbo with Multilingual (Telugu, Tenglish & English) Telephony Vocabulary Priming
   const groqKey = process.env.GROQ_API_KEY || "";
   if (groqKey) {
-    console.log(`[SARVAM_CONNECTED] Fallback STT active (whisper-large-v3-turbo, multilingual)...`);
+    console.log(`[WHISPER_STT_ACTIVE] Transcribing with Groq Whisper Turbo (Telugu te-IN)...`);
     try {
       const gForm = new FormData();
       const gBlob = new Blob([wav], { type: "audio/wav" });
       gForm.append("file", gBlob, "audio.wav");
       gForm.append("model", "whisper-large-v3-turbo");
+      gForm.append("language", "te");
       gForm.append(
         "prompt",
-        "కస్టమర్ మరియు సపోర్ట్ ఎగ్జిక్యూటివ్ మధ్య తెలుగు, ఇంగ్లీష్ సంభాషణ. Customer speaking Telugu, Tenglish, or English. హలో, అవునండి, order, villas, pricing, demo, address, ధన్యవాదాలు."
+        "కస్టమర్ తెలుగు లేదా టెంగ్లీష్‌లో మాట్లాడుతున్నారు: అవునండి, రిఫ్రిజిరేటర్లు, ధర, ఆర్డర్, అటెండెన్స్, ఫీజు, నరేష్, కాలేజ్, డెమో, అడ్రస్."
       );
       gForm.append("temperature", "0.0");
 
@@ -1230,54 +1231,45 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
           console.warn(`[AGENT_NOTICE] No custom agent bound to call. Proceeding with active profile.`);
         }
 
-        if (cartesiaAgentId) {
-          // ── CARTESIA NATIVE AGENT PATH (Lowest latency, full STT+LLM+TTS runtime) ──
-          console.log(`[LATENCY_TRACE] CARTESIA_CONNECTING → Connecting to Cartesia Agent WebSocket: ${cartesiaAgentId}`);
-          cartesiaAgentBridge = await handleCartesiaAgentStream(ws, cartesiaAgentId, streamId, callUuid, agentName);
-          if (cartesiaAgentBridge) {
-            useCartesiaNative = true;
-            greetingSent = true;
-            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Cartesia Native Agent active, streaming trained greeting`);
-          } else {
-            console.warn(`[CARTESIA_AGENT] Bridge failed or credits exhausted — auto-routing to low-latency TTS pipeline`);
+        // ── DELIVER WELCOME GREETING AS PER CARTESIA (0ms pickup) ──
+        if (!greetingSent) {
+          greetingSent = true;
+          setAiSpeaking(true, 5000);
+
+          let greetingEntry = agentGreetingCache.get(queryAgentId || "default");
+          if (!greetingEntry) {
+            greetingEntry = await getOrPrewarmGreeting(queryAgentId, queryCallerNumber);
           }
-        }
 
-        if (!useCartesiaNative) {
-          // ── LOW-LATENCY TTS PIPELINE PATH ─────────────────────────────────
-          if (!greetingSent) {
-            greetingSent = true;
-            setAiSpeaking(true, 5000);
+          if (greetingEntry) {
+            agentName = greetingEntry.agentName || agentName;
+            voiceId = greetingEntry.voiceId || voiceId;
+            const greeting = greetingEntry.greeting;
+            let greetAudio = greetingEntry.audioBuf;
 
-            let greetingEntry = agentGreetingCache.get(queryAgentId || "default");
-            if (!greetingEntry) {
-              greetingEntry = await getOrPrewarmGreeting(queryAgentId, queryCallerNumber);
+            console.log(`[LATENCY_TRACE] SPEECH_STARTED → Welcome greeting as per Cartesia delivered: "${greeting}" in ${Date.now() - tStart}ms`);
+
+            if (!greetAudio) {
+              greetAudio = await synthesizeSpeech(greeting, voiceId);
             }
 
-            if (greetingEntry) {
-              agentName = greetingEntry.agentName || agentName;
-              voiceId = greetingEntry.voiceId || voiceId;
-              const greeting = greetingEntry.greeting;
-              let greetAudio = greetingEntry.audioBuf;
-
-              console.log(`[LATENCY_TRACE] SPEECH_STARTED → Starter welcome greeting delivered: "${greeting}" in ${Date.now() - tStart}ms`);
-
-              if (!greetAudio) {
-                greetAudio = await synthesizeSpeech(greeting, voiceId);
-              }
-
-              if (greetAudio && greetAudio.length > 0 && streamId) {
-                const durationMs = (greetAudio.length / 8000) * 1000;
-                setAiSpeaking(true, durationMs);
-                sendAudioToVobiz(ws, streamId, greetAudio);
-                conversationHistory.push({ role: "assistant", content: greeting });
-                console.log(`[LISTENING] Starter greeting sent to phone. Listening for caller response...`);
-              } else {
-                setAiSpeaking(false);
+            if (greetAudio && greetAudio.length > 0 && streamId) {
+              const durationMs = (greetAudio.length / 8000) * 1000;
+              setAiSpeaking(true, durationMs);
+              sendAudioToVobiz(ws, streamId, greetAudio);
+              conversationHistory.push({ role: "assistant", content: greeting });
+              console.log(`[LISTENING] Welcome greeting sent to phone. Listening for caller response...`);
+              const state = activeCallStates.get(streamId);
+              if (state) {
+                state.stage = "GREETING_PLAYING";
+                state.greetingStarted = true;
+                state.lastTranscript = greeting;
               }
             } else {
               setAiSpeaking(false);
             }
+          } else {
+            setAiSpeaking(false);
           }
         }
 
@@ -1345,8 +1337,8 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
           // Low energy frame after speaking
           speechAudioChunks.push(chunk);
           const silenceDuration = Date.now() - lastSpeechTime;
-          // Natural conversational pause: 1350ms ensures caller finished their full sentence
-          if (silenceDuration >= 1350 || speechAudioChunks.length > 500) {
+          // Natural conversational pause: 800ms ensures caller finished their full sentence
+          if (silenceDuration >= 800 || speechAudioChunks.length > 500) {
             console.log(`[CALLER_SPEECH_END] Turn complete (${(speechAudioChunks.length * 20 / 1000).toFixed(1)}s audio, silence=${silenceDuration}ms)`);
             callerIsSpeaking = false;
             const turnAudio = Buffer.concat(speechAudioChunks);
