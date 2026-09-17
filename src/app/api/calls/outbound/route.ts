@@ -197,10 +197,73 @@ export async function POST(req: Request) {
     let telephonyReason = "";
     let telephonyDetails = "";
 
-    // ─── 1. Dispatch outbound call via Vobiz REST API ────────────────────
-    // When the callee answers, Vobiz will POST to our answer_url
-    // Our answer_url returns XML telling Vobiz to stream audio to our WebSocket
-    if (vobizAuthId && vobizAuthToken) {
+    // ─── 1. Primary Dispatch: Cartesia Realtime Voice Runtime (SIP Trunk) ───
+    // Cartesia acts as the Realtime Voice Agent Runtime, placing calls directly
+    // over the connected Vobiz SIP Trunk (ap_qXvGsN8xnFH3giNBsQ8QBM)
+    let cartesiaCallId = "";
+    let cartesiaDispatched = false;
+
+    if (cartesiaApiKey && cartesiaAgentId) {
+      try {
+        // Resolve from_number_id for the Cartesia agent
+        let fromNumberId = "ap_qXvGsN8xnFH3giNBsQ8QBM";
+        try {
+          const pnRes = await fetch("https://api.cartesia.ai/agents/phone-numbers", {
+            headers: {
+              "X-API-Key": cartesiaApiKey,
+              "Cartesia-Version": "2025-04-16",
+            },
+          });
+          if (pnRes.ok) {
+            const pnData = await pnRes.json();
+            const matching = pnData.data?.find(
+              (pn: any) => pn.agent?.id === cartesiaAgentId || pn.number === outboundCallerId
+            );
+            if (matching?.id) {
+              fromNumberId = matching.id;
+            }
+          }
+        } catch (pnErr) {
+          console.warn("[OUTBOUND] Could not fetch Cartesia phone numbers, using default:", pnErr);
+        }
+
+        console.log(`[CARTESIA OUTBOUND] Dispatching call to ${cleanNumber} using agent ${cartesiaAgentId} from ${fromNumberId}`);
+        const cartesiaCallRes = await fetch("https://api.cartesia.ai/agents/calls", {
+          method: "POST",
+          headers: {
+            "X-API-Key": cartesiaApiKey,
+            "Cartesia-Version": "2025-04-16",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from_number_id: fromNumberId,
+            agent_id: cartesiaAgentId,
+            ringing_timeout_seconds: 30,
+            outbound_calls: [{ to_number: cleanNumber }],
+          }),
+        });
+
+        const cartesiaCallData = await cartesiaCallRes.json();
+        console.log(`[CARTESIA OUTBOUND] Response (${cartesiaCallRes.status}):`, JSON.stringify(cartesiaCallData));
+
+        const callResult = cartesiaCallData.calls?.[0];
+        if (cartesiaCallRes.ok && callResult && callResult.agent_call_id && !callResult.error) {
+          cartesiaCallId = callResult.agent_call_id;
+          vobizCallId = cartesiaCallId;
+          telephonyStatus = "RINGING";
+          telephonyReason = "Call initiated via Cartesia Realtime Agent Runtime (Vobiz SIP Trunk)";
+          telephonyDetails = JSON.stringify(cartesiaCallData);
+          cartesiaDispatched = true;
+        } else if (callResult?.error) {
+          console.warn("[CARTESIA OUTBOUND] Cartesia call error, falling back to Vobiz API:", callResult.error);
+        }
+      } catch (cErr) {
+        console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception, falling back:", cErr);
+      }
+    }
+
+    // ─── 2. Fallback Dispatch: Vobiz REST API ──────────────────────────────
+    if (!cartesiaDispatched && vobizAuthId && vobizAuthToken) {
       try {
         const vobizApiUrl = `https://api.vobiz.ai/api/v1/Account/${vobizAuthId}/Call/`;
         const answerUrl = `${webhookUrl}/api/vobiz/incoming-call?agentId=${encodeURIComponent(resolvedAgentId)}&callerNumber=${encodeURIComponent(cleanNumber)}`;
@@ -244,7 +307,7 @@ export async function POST(req: Request) {
         telephonyReason = apiErr instanceof Error ? apiErr.message : "Vobiz API error";
         console.error("[VOBIZ API] Error:", telephonyReason);
       }
-    } else {
+    } else if (!cartesiaDispatched) {
       // Fallback to raw SIP if no API credentials
       try {
         const { dispatchVobizOutboundCall } = await import("@/lib/telephony/vobiz");
@@ -267,13 +330,13 @@ export async function POST(req: Request) {
       agentId: agent.id,
       agentName,
       direction: CallDirection.OUTBOUND,
-      status: telephonyStatus === "FAILED" ? CallStatus.FAILED : CallStatus.INITIALIZING,
-      stage: telephonyStatus === "FAILED" ? "FAILED" : "RINGING",
+      status: telephonyStatus === "FAILED" ? CallStatus.FAILED : (cartesiaDispatched ? CallStatus.ACTIVE : CallStatus.INITIALIZING),
+      stage: telephonyStatus === "FAILED" ? "FAILED" : (cartesiaDispatched ? "CONNECTED" : "RINGING"),
       vobizCallId,
       cartesiaAgentId,
-      lastSuccessfulStage: telephonyStatus === "FAILED" ? "FAILED" : "TELEPHONY_CREATED",
-      mediaConnected: false,
-      cartesiaConnected: false,
+      lastSuccessfulStage: telephonyStatus === "FAILED" ? "FAILED" : (cartesiaDispatched ? "CARTESIA_RUNTIME_CONNECTED" : "TELEPHONY_CREATED"),
+      mediaConnected: cartesiaDispatched,
+      cartesiaConnected: cartesiaDispatched,
       startedAt: new Date().toISOString(),
       durationSeconds: 0,
       language: "Telugu + English",
