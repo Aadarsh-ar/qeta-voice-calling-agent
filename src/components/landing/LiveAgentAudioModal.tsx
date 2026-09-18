@@ -4,58 +4,93 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X,
   Mic,
+  MicOff,
   Volume2,
+  VolumeX,
   PhoneOff,
   Sparkles,
-  VolumeX,
-  Radio,
-  Loader2,
+  Send,
   Play,
   RotateCcw,
+  Zap,
+  Loader2,
+  Bot,
+  User,
 } from "lucide-react";
 
-interface Props {
+export interface LiveTurn {
+  id: string;
+  role: "ai" | "caller";
+  text: string;
+  audioBase64?: string;
+  latencyMs?: number;
+  timestamp: string;
+  isLoadingAudio?: boolean;
+}
+
+interface LiveAgentAudioModalProps {
   isOpen: boolean;
   onClose: () => void;
   agentId?: string;
   agentName?: string;
+  initialGreeting?: string;
 }
 
-type ConvState =
-  | "connecting"
-  | "speaking"
-  | "listening"
-  | "interrupted"
-  | "ended"
-  | "error";
+const DEFAULT_AGENT_ID = "agent_WzcEn6kkRmPxAfBNHzvpa1";
+const DEFAULT_AGENT_NAME = "Sam (AI Voice Agent)";
+const DEFAULT_GREETING =
+  "హాయ్! నేను సామ్, qwetadotin యొక్క AI Voice Agent. నాతో ఏదైనా మాట్లాడండి — qwetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు.";
+
+const QUICK_STARTERS = [
+  "qwetadotin అంటే ఏమిటి?",
+  "నువ్వు ఏం చేయగలవు?",
+  "ఒక business scenario try చేద్దాం",
+  "నేను ఒక restaurant owner",
+  "నువ్వు మనిషివా?",
+  "Pricing details చెప్పండి",
+];
 
 export function LiveAgentAudioModal({
   isOpen,
   onClose,
-  agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1",
-  agentName = "Personal Assistant (Sam)",
-}: Props) {
-  const [state, setState] = useState<ConvState>("connecting");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [agentSpokenText, setAgentSpokenText] = useState("");
-  const [micVolume, setMicVolume] = useState(0);
-  const [callDuration, setCallDuration] = useState(0);
+  agentId = DEFAULT_AGENT_ID,
+  agentName = DEFAULT_AGENT_NAME,
+  initialGreeting = DEFAULT_GREETING,
+}: LiveAgentAudioModalProps) {
+  const [inputText, setInputText] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [callSeconds, setCallSeconds] = useState(0);
+  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
+  const [isGreetingLoading, setIsGreetingLoading] = useState(false);
 
-  // References
-  const wsRef = useRef<WebSocket | null>(null);
-  const isCallActiveRef = useRef<boolean>(false);
+  const effectiveGreeting = (initialGreeting || DEFAULT_GREETING).trim();
+
+  const [turns, setTurns] = useState<LiveTurn[]>([
+    {
+      id: "greeting",
+      role: "ai",
+      text: effectiveGreeting,
+      timestamp: "00:00",
+      isLoadingAudio: true,
+    },
+  ]);
+
+  // Audio refs
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextPlayTimeRef = useRef<number>(0);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const isMutedRef = useRef<boolean>(false);
+  const greetingAudioRef = useRef<string | null>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isHandsFree, setIsHandsFree] = useState(true);
+  const isHandsFreeRef = useRef(true);
+  isHandsFreeRef.current = isHandsFree;
 
-  // Synchronously initialize AudioContext
+  // Initialize or resume AudioContext safely on user interaction
   const ensureAudioContext = useCallback(() => {
     try {
       const AudioCtx =
@@ -69,604 +104,765 @@ export function LiveAgentAudioModal({
       }
       return audioContextRef.current;
     } catch (err) {
-      console.warn("[LiveAgent] AudioContext init note:", err);
+      console.warn("[LiveAgent] AudioContext error:", err);
       return null;
     }
   }, []);
 
-  // Stop / flush active agent audio playback
-  const stopAgentPlayback = useCallback(() => {
-    activeSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch {}
-    });
-    activeSourcesRef.current = [];
-    if (audioContextRef.current) {
-      nextPlayTimeRef.current = audioContextRef.current.currentTime;
-    }
-    setState("listening");
-  }, []);
-
-  // Terminate voice session completely
-  const terminateSession = useCallback(() => {
-    isCallActiveRef.current = false;
-
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-
-    // Stop microphone processing
-    if (micProcessorRef.current) {
-      try {
-        micProcessorRef.current.disconnect();
-      } catch {}
-      micProcessorRef.current = null;
-    }
-
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
-
-    // Stop active audio sources
-    activeSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch {}
-    });
-    activeSourcesRef.current = [];
-
-    // Close WebSocket
-    if (wsRef.current) {
-      try {
-        wsRef.current.close(1000, "Normal termination");
-      } catch {}
-      wsRef.current = null;
-    }
-
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      try {
-        audioContextRef.current.close();
-      } catch {}
-      audioContextRef.current = null;
-    }
-
-    setState("ended");
-    setMicVolume(0);
-  }, []);
-
-  const handleClose = () => {
-    terminateSession();
-    onClose();
-  };
-
-  // Convert Float32Array to 16kHz 16-bit PCM Linear
-  const convertFloatTo16kHzInt16 = (
-    input: Float32Array,
-    inputSampleRate: number
-  ): Int16Array => {
-    if (inputSampleRate === 16000) {
-      const output = new Int16Array(input.length);
-      for (let i = 0; i < input.length; i++) {
-        const s = Math.max(-1, Math.min(1, input[i]));
-        output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  // Safely decode and play 16-bit PCM audio from Cartesia
+  const playPcmAudio = useCallback(
+    (base64: string, sampleRate = 16000, onEnded?: () => void) => {
+      if (isMuted) {
+        if (onEnded) onEnded();
+        return;
       }
-      return output;
-    }
-
-    // Linear downsampling
-    const ratio = inputSampleRate / 16000;
-    const newLength = Math.round(input.length / ratio);
-    const result = new Int16Array(newLength);
-    for (let i = 0; i < newLength; i++) {
-      const idx = Math.floor(i * ratio);
-      const s = Math.max(-1, Math.min(1, input[idx]));
-      result[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-    return result;
-  };
-
-  // Play incoming 40ms PCM frame from Cartesia
-  const enqueuePcmChunk = useCallback(
-    (base64: string) => {
       try {
-        const ctx = ensureAudioContext();
-        if (!ctx) return;
-
         const binary = window.atob(base64);
         const len = binary.length;
-        if (len === 0) return;
+        if (len === 0) {
+          if (onEnded) onEnded();
+          return;
+        }
 
-        const numSamples = Math.floor(len / 2);
-        const float32 = new Float32Array(numSamples);
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
           bytes[i] = binary.charCodeAt(i);
         }
+
+        // Safe PCM decoding using DataView (never throws RangeError on odd byte lengths)
+        const numSamples = Math.floor(len / 2);
+        const float32 = new Float32Array(numSamples);
         const dataView = new DataView(bytes.buffer, bytes.byteOffset, numSamples * 2);
         for (let i = 0; i < numSamples; i++) {
           float32[i] = dataView.getInt16(i * 2, true) / 32768.0;
         }
 
-        const buffer = ctx.createBuffer(1, numSamples, 16000);
-        buffer.getChannelData(0).set(float32);
+        const ctx = ensureAudioContext();
+        if (!ctx) {
+          if (onEnded) onEnded();
+          return;
+        }
 
+        // Stop any current source immediately
+        if (activeSourceRef.current) {
+          try {
+            activeSourceRef.current.stop();
+          } catch {}
+          activeSourceRef.current = null;
+        }
+
+        const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+        buffer.getChannelData(0).set(float32);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
+        source.connect(ctx.destination);
 
-        if (analyserRef.current) {
-          source.connect(analyserRef.current);
-          analyserRef.current.connect(ctx.destination);
-        } else {
-          source.connect(ctx.destination);
-        }
-
-        const now = ctx.currentTime;
-        if (nextPlayTimeRef.current < now) {
-          nextPlayTimeRef.current = now + 0.02; // Small 20ms jitter protection
-        }
-
-        source.start(nextPlayTimeRef.current);
-        nextPlayTimeRef.current += buffer.duration;
-
-        activeSourcesRef.current.push(source);
-        setState("speaking");
-
+        setIsSpeaking(true);
         source.onended = () => {
-          const idx = activeSourcesRef.current.indexOf(source);
-          if (idx !== -1) activeSourcesRef.current.splice(idx, 1);
-          if (activeSourcesRef.current.length === 0 && isCallActiveRef.current) {
-            setState("listening");
+          activeSourceRef.current = null;
+          setIsSpeaking(false);
+          if (onEnded) onEnded();
+          if (isHandsFreeRef.current) {
+            setTimeout(() => {
+              if (startListeningRef.current) {
+                startListeningRef.current();
+              }
+            }, 300);
           }
         };
+
+        activeSourceRef.current = source;
+        source.start();
+
+        if (ctx.state === "suspended") {
+          ctx
+            .resume()
+            .then(() => {
+              setIsAutoplayBlocked(false);
+            })
+            .catch(() => {
+              setIsAutoplayBlocked(true);
+            });
+        } else {
+          setIsAutoplayBlocked(false);
+        }
       } catch (err) {
-        console.warn("[LiveAgent] PCM chunk playback note:", err);
+        console.warn("[LiveAgent] PCM playback note:", err);
+        setIsSpeaking(false);
+        if (onEnded) onEnded();
       }
     },
-    [ensureAudioContext]
+    [isMuted, ensureAudioContext]
   );
 
-  // Setup User Microphone Capture and Stream to Cartesia
-  const setupMicrophone = useCallback(
-    async (ws: WebSocket, ctx: AudioContext) => {
+  // Stop active speech (barge-in / interrupt)
+  const stopAudio = useCallback(() => {
+    if (activeSourceRef.current) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            channelCount: 1,
-            sampleRate: 16000,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
+        activeSourceRef.current.stop();
+      } catch {}
+      activeSourceRef.current = null;
+    }
+    setIsSpeaking(false);
+  }, []);
 
-        micStreamRef.current = stream;
+  // Call timer
+  useEffect(() => {
+    if (isOpen) {
+      setCallSeconds(0);
+      timerRef.current = setInterval(() => {
+        setCallSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopAudio();
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopAudio();
+    };
+  }, [isOpen, stopAudio]);
 
-        const micSource = ctx.createMediaStreamSource(stream);
-        const processor = ctx.createScriptProcessor(1024, 1, 1);
-        micProcessorRef.current = processor;
+  // Auto scroll transcript to latest turn
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns, isThinking]);
 
-        micSource.connect(processor);
+  // Synthesize and speak the initial greeting on modal open
+  useEffect(() => {
+    if (!isOpen) {
+      greetingAudioRef.current = null;
+      return;
+    }
 
-        // Silent node so mic isn't sent to local speakers
-        const silentNode = ctx.createGain();
-        silentNode.gain.value = 0;
-        processor.connect(silentNode);
-        silentNode.connect(ctx.destination);
+    const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
+    setTurns([
+      {
+        id: "greeting",
+        role: "ai",
+        text: greetingText,
+        timestamp: "00:00",
+        isLoadingAudio: true,
+      },
+    ]);
 
-        processor.onaudioprocess = (e) => {
-          if (!isCallActiveRef.current || ws.readyState !== WebSocket.OPEN) return;
-          if (isMutedRef.current) return;
+    let isCancelled = false;
+    setIsGreetingLoading(true);
 
-          const inputData = e.inputBuffer.getChannelData(0);
+    fetch("/api/agent/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId,
+        agentName,
+        cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+        ttsOnly: true,
+        textToSpeak: greetingText,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (isCancelled) return;
+        setIsGreetingLoading(false);
+        if (data.success && data.audioBase64) {
+          greetingAudioRef.current = data.audioBase64;
+          setTurns((prev) =>
+            prev.map((t) =>
+              t.id === "greeting"
+                ? {
+                    ...t,
+                    audioBase64: data.audioBase64,
+                    latencyMs: 140,
+                    isLoadingAudio: false,
+                  }
+                : t
+            )
+          );
+          // Play initial greeting aloud
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+        } else {
+          setTurns((prev) =>
+            prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn("[LiveAgent] Greeting synthesis note:", err);
+        if (!isCancelled) {
+          setIsGreetingLoading(false);
+          setTurns((prev) =>
+            prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
+          );
+        }
+      });
 
-          // Calculate energy for visualizer
-          let sum = 0;
-          for (let i = 0; i < inputData.length; i++) {
-            sum += inputData[i] * inputData[i];
-          }
-          const rms = Math.sqrt(sum / inputData.length);
-          setMicVolume(Math.min(1, rms * 6));
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, agentId, agentName, initialGreeting, playPcmAudio]);
 
-          // Convert Float32 to 16kHz Int16
-          const pcm16 = convertFloatTo16kHzInt16(inputData, ctx.sampleRate);
+  // Send turn to backend
+  const handleSend = async (textToSend: string) => {
+    const cleanText = textToSend.trim();
+    if (!cleanText || isThinking) return;
 
-          // Base64 encode
-          let binary = "";
-          const bytes = new Uint8Array(pcm16.buffer);
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64 = window.btoa(binary);
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
 
-          try {
-            ws.send(
-              JSON.stringify({
-                event: "media",
-                media: { payload: base64 },
-              })
-            );
-          } catch {}
+    ensureAudioContext();
+    stopAudio();
+    setInputText("");
+    setIsThinking(true);
+
+    const now = new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" });
+    const userTurn: LiveTurn = {
+      id: `user_${Date.now()}`,
+      role: "caller",
+      text: cleanText,
+      timestamp: now,
+    };
+
+    setTurns((prev) => [...prev, userTurn]);
+
+    try {
+      const history = [...turns, userTurn].map((t) => ({
+        role: t.role === "caller" ? "user" : "assistant",
+        content: t.text,
+      }));
+
+      const res = await fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId,
+          agentName,
+          cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+          userMessage: cleanText,
+          conversationHistory: history,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.rawReply) {
+        const aiTurn: LiveTurn = {
+          id: `ai_${Date.now()}`,
+          role: "ai",
+          text: data.rawReply,
+          audioBase64: data.audioBase64,
+          latencyMs: data.latencies?.totalMs,
+          timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
         };
-      } catch (err) {
-        console.warn("[LiveAgent] Microphone access denied or unavailable:", err);
+        setTurns((prev) => [...prev, aiTurn]);
+
+        if (data.audioBase64) {
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+        }
+      } else {
+        setTurns((prev) => [
+          ...prev,
+          {
+            id: `ai_err_${Date.now()}`,
+            role: "ai",
+            text: data.error || "క్షమించండి, సర్వర్ నుండి ప్రతిస్పందన రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+            timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+          },
+        ]);
       }
-    },
-    []
-  );
+    } catch {
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: `ai_err_${Date.now()}`,
+          role: "ai",
+          text: "కనెక్షన్ సమస్య వచ్చింది. దయచేసి మళ్ళీ మాట్లాడండి.",
+          timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setIsThinking(false);
+    }
+  };
 
-  // Start the voice session immediately (< 300ms connection)
-  const startSession = useCallback(async () => {
-    setErrorMessage("");
-    setAgentSpokenText("");
-    setCallDuration(0);
-    setState("connecting");
-    isCallActiveRef.current = true;
+  // Ref wrappers to avoid stale closures in callbacks
+  const handleSendRef = useRef<(t: string) => void>(() => {});
+  handleSendRef.current = handleSend;
+  const startListeningRef = useRef<() => void>(() => {});
 
-    const ctx = ensureAudioContext();
+  const startListening = useCallback(() => {
+    ensureAudioContext();
+    const SpeechRec =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) return;
 
-    // Create visualizer analyser node
-    if (ctx && !analyserRef.current) {
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      analyserRef.current = analyser;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
     }
 
     try {
-      // Direct WebSocket to the high-speed Cartesia stream bridge
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host || "localhost:3000";
-      const wsUrl = `${protocol}//${host}/api/cartesia/stream?agentId=${encodeURIComponent(agentId)}`;
+      const rec = new SpeechRec();
+      rec.lang = "te-IN";
+      rec.continuous = true;
+      rec.interimResults = true;
 
-      console.log(`[LiveAgent] Connecting immediately to Cartesia Agent stream: ${wsUrl}`);
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      rec.onstart = () => {
+        setIsListening(true);
+      };
 
-      ws.onopen = () => {
-        console.log("[LiveAgent] Cartesia Agent WebSocket connected in < 150ms");
-        if (ctx) {
-          setupMicrophone(ws, ctx);
+      rec.onresult = (event: any) => {
+        let transcript = "";
+        let isFinal = false;
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) isFinal = true;
         }
-        // Start duration counter
-        if (!timerRef.current) {
-          timerRef.current = setInterval(() => {
-            setCallDuration((prev) => prev + 1);
-          }, 1000);
+
+        const clean = transcript.trim();
+        if (clean) {
+          setInputText(clean);
+          // Instant barge-in: stop any AI voice speech immediately when caller speaks
+          stopAudio();
+        }
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+
+        if (clean.length > 0) {
+          if (isFinal) {
+            handleSendRef.current(clean);
+            try {
+              rec.stop();
+            } catch {}
+          } else {
+            // Buffer 700ms silence to auto-send turn with lowest latency
+            silenceTimerRef.current = setTimeout(() => {
+              handleSendRef.current(clean);
+              try {
+                rec.stop();
+              } catch {}
+            }, 700);
+          }
         }
       };
 
-      ws.onmessage = (event) => {
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      rec.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (err) {
+      console.warn("[LiveAgent] Speech recognition notice:", err);
+      setIsListening(false);
+    }
+  }, [ensureAudioContext, stopAudio]);
+
+  startListeningRef.current = startListening;
+
+  // Toggle Microphone / Speech-to-Text
+  const toggleListening = () => {
+    ensureAudioContext();
+    if (isListening) {
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (recognitionRef.current) {
         try {
-          const msg = JSON.parse(event.data);
-          const evt = msg.event || msg.type;
-
-          // 1. Audio stream frames from Cartesia TTS
-          if (evt === "media_output" || evt === "audio_output") {
-            const payload = msg.media?.payload || msg.audio || msg.data;
-            if (payload) {
-              enqueuePcmChunk(payload);
-            }
-          }
-
-          // 2. Real-time spoken transcript text delta
-          else if (evt === "turn_output_text_delta") {
-            const text = msg.turn_output_text_delta?.text || msg.text;
-            if (text) {
-              setAgentSpokenText((prev) => prev + text);
-            }
-          }
-
-          // 3. New turn started by agent
-          else if (evt === "turn_started") {
-            setState("speaking");
-          }
-
-          // 4. Instant Barge-In / Interruption
-          else if (
-            evt === "audio_output_clear" ||
-            evt === "interruption" ||
-            evt === "turn_interrupted"
-          ) {
-            console.log("[LiveAgent] Caller interrupted agent speech");
-            stopAgentPlayback();
-          }
-
-          // 5. Turn finished
-          else if (evt === "turn_ended") {
-            if (activeSourcesRef.current.length === 0) {
-              setState("listening");
-            }
-          }
-
-          // 6. Error event
-          else if (evt === "error") {
-            console.warn("[LiveAgent] Error from Cartesia stream:", msg);
-            if (msg.error) setErrorMessage(msg.error);
-          }
-        } catch (err) {
-          console.warn("[LiveAgent] Message parse note:", err);
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error("[LiveAgent] WebSocket error:", err);
-        setErrorMessage("Connection to Cartesia Agent failed");
-        setState("error");
-      };
-
-      ws.onclose = () => {
-        console.log("[LiveAgent] Cartesia Agent WebSocket closed");
-        if (isCallActiveRef.current) {
-          setState("ended");
-        }
-      };
-    } catch (err: unknown) {
-      console.error("[LiveAgent] Session setup error:", err);
-      setErrorMessage(err instanceof Error ? err.message : "Failed to connect");
-      setState("error");
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      return;
     }
-  }, [agentId, enqueuePcmChunk, ensureAudioContext, setupMicrophone, stopAgentPlayback]);
 
-  // Auto-connect immediately when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      startSession();
-    } else {
-      terminateSession();
+    const SpeechRec =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert("Microphone recognition is not supported in this browser. Please type your message below.");
+      return;
     }
-    return () => {
-      terminateSession();
-    };
-  }, [isOpen, startSession, terminateSession]);
 
-  const toggleMute = () => {
-    const next = !isMuted;
-    setIsMuted(next);
-    isMutedRef.current = next;
+    startListening();
   };
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  // Reset conversation
+  const handleReset = () => {
+    ensureAudioContext();
+    stopAudio();
+    const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
+    setTurns([
+      {
+        id: "greeting",
+        role: "ai",
+        text: greetingText,
+        timestamp: "00:00",
+        audioBase64: greetingAudioRef.current || undefined,
+        latencyMs: 140,
+      },
+    ]);
+    setCallSeconds(0);
+
+    if (greetingAudioRef.current) {
+      playPcmAudio(greetingAudioRef.current);
+    } else {
+      setIsGreetingLoading(true);
+      fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId,
+          agentName,
+          cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+          ttsOnly: true,
+          textToSpeak: greetingText,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          setIsGreetingLoading(false);
+          if (d.success && d.audioBase64) {
+            greetingAudioRef.current = d.audioBase64;
+            setTurns([
+              {
+                id: "greeting",
+                role: "ai",
+                text: greetingText,
+                timestamp: "00:00",
+                audioBase64: d.audioBase64,
+                latencyMs: 140,
+              },
+            ]);
+            playPcmAudio(d.audioBase64);
+          }
+        })
+        .catch(() => setIsGreetingLoading(false));
+    }
+  };
+
+  const formatDuration = (sec: number) => {
+    const mins = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${mins.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const handleClose = () => {
+    stopAudio();
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        className="relative w-full sm:max-w-[480px] bg-white sm:rounded-3xl border-t sm:border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
-        style={{ height: "min(680px, 94dvh)" }}
+        className="relative w-full sm:max-w-2xl bg-white sm:rounded-3xl border-t sm:border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+        style={{ height: "min(730px, 94dvh)" }}
       >
         {/* ─── Header ─── */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0 bg-white">
+        <div className="px-5 py-4 border-b border-slate-100 bg-white/95 backdrop-blur-md flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div
-              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                state === "speaking"
-                  ? "bg-emerald-100 ring-2 ring-emerald-500 ring-offset-1 animate-pulse"
-                  : state === "listening"
-                  ? "bg-red-50 ring-2 ring-red-400 ring-offset-1"
-                  : "bg-emerald-50"
-              }`}
-            >
-              {state === "listening" ? (
-                <Mic className="w-4 h-4 text-red-500" />
-              ) : (
-                <Volume2 className="w-4 h-4 text-emerald-700" />
+            <div className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white shadow-md shadow-emerald-700/20">
+              <Bot className="w-5 h-5" />
+              {isSpeaking && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-white animate-pulse" />
               )}
             </div>
             <div>
-              <h3 className="font-heading text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>{agentName}</span>
-                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />
-                  Live Cartesia Agent
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                  {agentName}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                  Cartesia Sonic · Neural Voice
                 </span>
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                {state === "connecting"
-                  ? "Connecting in < 1s..."
-                  : state === "speaking"
-                  ? "Agent Speaking · Interrupt anytime"
-                  : state === "listening"
-                  ? "Listening · Speak naturally"
-                  : "Cartesia Neural Voice Active"}
-              </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                <span className="inline-flex items-center gap-1 font-mono font-semibold text-emerald-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {formatDuration(callSeconds)}
+                </span>
+                <span>•</span>
+                <span className="text-[11px] font-medium text-slate-600">
+                  {isSpeaking
+                    ? "Agent Speaking..."
+                    : isThinking
+                    ? "Thinking & synthesizing..."
+                    : isListening
+                    ? "Listening to your voice..."
+                    : isGreetingLoading
+                    ? "Warming up voice..."
+                    : "Ready · Talk or type"}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-md">
-              {formatTime(callDuration)}
-            </span>
-            <button
-              onClick={handleClose}
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
-              title="Close modal"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* ─── MAIN CONTENT ─── */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col items-center justify-center min-h-0 bg-[#FBFBFA] relative">
-          {/* Subtle Glow Background */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
-            <div className="w-64 h-64 rounded-full bg-radial from-emerald-100 to-transparent blur-2xl" />
-          </div>
-
-          {/* STATE: CONNECTING */}
-          {state === "connecting" && (
-            <div className="flex flex-col items-center text-center space-y-4 animate-in fade-in duration-100 z-10">
-              <div className="w-24 h-24 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center shadow-inner">
-                <Loader2 className="w-10 h-10 text-emerald-700 animate-spin" />
-              </div>
-              <div>
-                <h4 className="font-heading text-base font-bold text-slate-900">
-                  Connecting to {agentName}
-                </h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  Starting zero-latency Cartesia stream...
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* STATE: SPEAKING */}
-          {state === "speaking" && (
-            <div className="w-full flex flex-col items-center text-center space-y-6 animate-in fade-in duration-150 z-10">
-              {/* Dynamic Sound Wave Pulse */}
-              <div className="relative w-32 h-32 rounded-full bg-emerald-100/70 border-2 border-emerald-400/80 flex items-center justify-center shadow-lg shadow-emerald-500/10">
-                <div className="flex items-center gap-1.5 h-12">
-                  {[28, 44, 18, 48, 32, 52, 22, 42, 20].map((h, i) => (
-                    <span
-                      key={i}
-                      className="w-1.5 rounded-full bg-emerald-600"
-                      style={{
-                        height: `${h}px`,
-                        animation: `pulse ${0.35 + (i % 3) * 0.12}s ease-in-out infinite alternate`,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                  Sam is Speaking
-                </span>
-                <p className="text-xs text-slate-500 mt-2">
-                  Speak directly to interrupt (Barge-in active)
-                </p>
-              </div>
-
-              {/* Real-time Streaming Subtitles */}
-              {agentSpokenText && (
-                <div className="w-full max-w-sm p-4 rounded-2xl bg-white border border-slate-200 shadow-sm text-left">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Live Spoken Transcript:
-                  </p>
-                  <p className="text-xs sm:text-sm text-slate-800 font-medium leading-relaxed max-h-28 overflow-y-auto">
-                    {agentSpokenText}
-                  </p>
-                </div>
-              )}
-
-              {/* Tap to Interrupt Button */}
-              <button
-                type="button"
-                onClick={stopAgentPlayback}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-              >
-                <VolumeX className="w-3.5 h-3.5" />
-                <span>Tap to interrupt</span>
-              </button>
-            </div>
-          )}
-
-          {/* STATE: LISTENING */}
-          {state === "listening" && (
-            <div className="w-full flex flex-col items-center text-center space-y-6 animate-in fade-in duration-150 z-10">
-              {/* Reactive Microphone Visualizer */}
-              <div
-                className="relative flex items-center justify-center transition-transform duration-75"
-                style={{
-                  transform: `scale(${1 + micVolume * 0.3})`,
-                }}
-              >
-                <div className="w-32 h-32 rounded-full bg-red-100/70 border-2 border-red-300 flex items-center justify-center animate-pulse shadow-lg shadow-red-500/10">
-                  <div className="w-20 h-20 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md shadow-red-500/30">
-                    <Mic className="w-9 h-9" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-red-600 bg-red-50 px-3 py-1 rounded-full border border-red-200 animate-pulse">
-                  Listening to You
-                </span>
-                <p className="text-xs text-slate-600 font-medium mt-2">
-                  Speak in Telugu or English — Sam will reply instantly
-                </p>
-              </div>
-
-              {agentSpokenText && (
-                <div className="w-full max-w-sm p-3.5 rounded-2xl bg-white/90 border border-slate-200 text-left">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Last response:
-                  </p>
-                  <p className="text-xs text-slate-700 leading-relaxed line-clamp-3">
-                    {agentSpokenText}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* STATE: ERROR OR ENDED */}
-          {(state === "error" || state === "ended") && (
-            <div className="flex flex-col items-center text-center space-y-4 animate-in fade-in duration-150 z-10">
-              <div className="w-20 h-20 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600">
-                <PhoneOff className="w-8 h-8" />
-              </div>
-              <div>
-                <h4 className="font-heading text-base font-bold text-slate-900">
-                  {state === "error" ? "Connection Issue" : "Call Ended"}
-                </h4>
-                <p className="text-xs text-slate-500 mt-1 max-w-xs">
-                  {errorMessage || "The voice session has ended."}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={startSession}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition shadow-sm cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Call Again</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* ─── Bottom Control Bar ─── */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-white shrink-0 flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={toggleMute}
+              onClick={() => {
+                ensureAudioContext();
+                setIsMuted(!isMuted);
+                if (!isMuted) stopAudio();
+              }}
               className={`p-2 rounded-xl border transition cursor-pointer ${
                 isMuted
-                  ? "bg-red-50 text-red-600 border-red-200"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                  ? "bg-rose-50 text-rose-600 border-rose-200"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200"
               }`}
-              title={isMuted ? "Unmute Mic" : "Mute Mic"}
+              title={isMuted ? "Unmute Voice" : "Mute Voice"}
             >
-              {isMuted ? <Mic className="w-4 h-4 text-red-500" /> : <Mic className="w-4 h-4" />}
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
-            <span className="text-[11px] text-slate-500">
-              {isMuted ? "Microphone muted" : "Microphone active"}
-            </span>
-          </div>
 
-          <button
-            type="button"
-            onClick={handleClose}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold text-xs transition cursor-pointer shadow-xs"
+            <button
+              type="button"
+              onClick={handleReset}
+              className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition cursor-pointer"
+              title="Restart Conversation"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClose}
+              className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-800 border border-slate-200 transition cursor-pointer ml-1"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* ─── Autoplay Unlock Notice (if browser policy paused audio) ─── */}
+        {isAutoplayBlocked && (
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900 font-medium shrink-0 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-amber-700 animate-bounce" />
+              <span>Audio autoplay was paused by your browser. Click to hear Sam speak:</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                ensureAudioContext();
+                if (turns[0]?.audioBase64) {
+                  playPcmAudio(turns[0].audioBase64);
+                }
+                setIsAutoplayBlocked(false);
+              }}
+              className="px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-xs transition cursor-pointer shrink-0"
+            >
+              Play Voice
+            </button>
+          </div>
+        )}
+
+        {/* ─── Dynamic Speaking Equalizer Banner ─── */}
+        {isSpeaking && (
+          <div className="px-5 py-2.5 bg-emerald-50/90 border-b border-emerald-200/60 flex items-center justify-between text-xs text-emerald-950 font-medium shrink-0 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-1 h-3.5">
+                <span className="w-1 bg-emerald-600 rounded-full animate-eq-1" />
+                <span className="w-1 bg-emerald-600 rounded-full animate-eq-2" />
+                <span className="w-1 bg-emerald-600 rounded-full animate-eq-3" />
+                <span className="w-1 bg-emerald-600 rounded-full animate-eq-4" />
+                <span className="w-1 bg-emerald-600 rounded-full animate-eq-2" />
+              </div>
+              <span className="font-semibold text-emerald-900">
+                Sam is speaking live audio via Cartesia Neural Voice
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={stopAudio}
+              className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 underline cursor-pointer"
+            >
+              Stop Audio (Interrupt)
+            </button>
+          </div>
+        )}
+
+        {/* ─── Conversation Transcript Stream ─── */}
+        <div className="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4 bg-[#FAFAF8]/70">
+          {turns.map((turn) => {
+            const isAi = turn.role === "ai";
+            return (
+              <div
+                key={turn.id}
+                className={`flex items-start gap-3 ${isAi ? "justify-start" : "justify-end"}`}
+              >
+                {isAi && (
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                )}
+                <div
+                  className={`max-w-[84%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-xs sm:text-sm shadow-xs leading-relaxed ${
+                    isAi
+                      ? "bg-white border border-slate-200/90 text-slate-800 rounded-tl-sm"
+                      : "bg-emerald-700 text-white rounded-tr-sm"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{turn.text}</p>
+                  <div
+                    className={`flex items-center justify-between gap-3 mt-2 pt-1.5 text-[10px] ${
+                      isAi
+                        ? "text-slate-400 border-t border-slate-100"
+                        : "text-emerald-200 border-t border-emerald-600/50"
+                    }`}
+                  >
+                    <span>{turn.timestamp}</span>
+                    {isAi && (
+                      <div className="flex items-center gap-2.5">
+                        {turn.audioBase64 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              ensureAudioContext();
+                              playPcmAudio(turn.audioBase64!);
+                            }}
+                            className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 transition cursor-pointer"
+                          >
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>{isSpeaking ? "Playing..." : "Replay"}</span>
+                          </button>
+                        ) : turn.isLoadingAudio ? (
+                          <span className="inline-flex items-center gap-1 text-slate-400">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            <span>Generating voice...</span>
+                          </span>
+                        ) : null}
+
+                        {turn.latencyMs && (
+                          <span className="font-mono text-emerald-700 font-semibold inline-flex items-center gap-0.5">
+                            <Zap className="w-2.5 h-2.5" />
+                            {(turn.latencyMs / 1000).toFixed(2)}s
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {!isAi && (
+                  <div className="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                    <User className="w-4 h-4" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {isThinking && (
+            <div className="flex items-center gap-3 justify-start text-xs text-slate-500 animate-in fade-in">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div className="px-4 py-3 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-spin" />
+                <span className="text-slate-700 font-medium">
+                  Sam is formulating answer & synthesizing Telugu voice...
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div ref={transcriptEndRef} />
+        </div>
+
+        {/* ─── Quick Conversation Starters ─── */}
+        <div className="px-4 py-2 bg-white border-t border-slate-100 flex items-center gap-2 overflow-x-auto shrink-0 scrollbar-none">
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider mr-0.5 flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-emerald-600" />
+            Try:
+          </span>
+          {QUICK_STARTERS.map((prompt, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                ensureAudioContext();
+                handleSend(prompt);
+              }}
+              disabled={isThinking}
+              className="px-3 py-1 rounded-full bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 text-[11px] font-medium border border-slate-200/80 hover:border-emerald-300 transition shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        {/* ─── Interactive Voice & Text Input ─── */}
+        <div className="p-3.5 bg-white border-t border-slate-200 shrink-0">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              ensureAudioContext();
+              handleSend(inputText);
+            }}
+            className="flex items-center gap-2"
           >
-            <PhoneOff className="w-3.5 h-3.5" />
-            <span>End Call</span>
-          </button>
+            {/* Mic Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`p-3 rounded-2xl border transition shrink-0 cursor-pointer ${
+                isListening
+                  ? "bg-rose-600 text-white border-rose-600 animate-pulse shadow-md shadow-rose-500/20"
+                  : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+              }`}
+              title={isListening ? "Listening... click to stop" : "Speak into microphone"}
+            >
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+
+            {/* Text Input */}
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Speak or type in Telugu or English (e.g. నా బిజినెస్ కోసం వాయిస్ ఏజెంట్ ఎలా పనిచేస్తుంది?)..."
+              disabled={isThinking}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-[#FAFAF8] text-slate-900 text-xs sm:text-sm focus:outline-none focus:border-emerald-600 focus:bg-white transition"
+            />
+
+            {/* Send Button */}
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isThinking}
+              className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Send</span>
+            </button>
+
+            {/* End Call Button */}
+            <button
+              type="button"
+              onClick={handleClose}
+              className="p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold transition shrink-0 cursor-pointer"
+              title="End conversation"
+            >
+              <PhoneOff className="w-4 h-4" />
+            </button>
+          </form>
         </div>
       </div>
     </div>

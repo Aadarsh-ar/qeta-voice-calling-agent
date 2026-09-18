@@ -7,6 +7,7 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
+  Mic,
   PhoneCall,
   CheckCircle2,
   Globe,
@@ -30,7 +31,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[#FAFAF8] text-slate-900 flex flex-col selection:bg-emerald-100 selection:text-emerald-900">
       {/* ─── 1. Header (Matching Reference Navigation) ─── */}
-      <LandingHeader />
+      <LandingHeader onOpenTestAgent={() => setIsAudioModalOpen(true)} />
 
       {/* ─── 2. Hero Section (Pixel-Aligned to Reference Image) ─── */}
       <section className="relative pt-8 pb-16 lg:pt-14 lg:pb-24 overflow-hidden">
@@ -67,16 +68,20 @@ export default function HomePage() {
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                 </Link>
 
-                {/* Secondary CTA (Interactive Audio Audition) */}
+                {/* Secondary CTA (Interactive Voice Chat Test Agent) */}
                 <button
                   type="button"
                   onClick={() => setIsAudioModalOpen(true)}
-                  className="btn-emerald-secondary text-sm sm:text-base px-6 py-3.5 group"
+                  className="btn-emerald-secondary text-sm sm:text-base px-6 py-3.5 group relative cursor-pointer"
                 >
                   <span className="w-6 h-6 rounded-full bg-emerald-100/90 text-emerald-800 flex items-center justify-center shrink-0 -ml-1 transition-transform group-hover:scale-105">
-                    <Play className="w-3 h-3 fill-current ml-0.5" />
+                    <Mic className="w-3.5 h-3.5 text-emerald-700" />
                   </span>
-                  <span>Listen to a live agent</span>
+                  <span>Test live agent</span>
+                  <span className="ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    Voice Chat
+                  </span>
                 </button>
               </div>
             </div>
@@ -371,7 +376,8 @@ export default function HomePage() {
         isOpen={isAudioModalOpen}
         onClose={() => setIsAudioModalOpen(false)}
         agentId="agent_WzcEn6kkRmPxAfBNHzvpa1"
-        agentName="Sam (Personal Assistant)"
+        agentName="Sam (AI Voice Agent)"
+        initialGreeting="హాయ్! నేను సామ్, qwetadotin యొక్క AI Voice Agent. నాతో ఏదైనా మాట్లాడండి — qwetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు."
       />
     </div>
   );

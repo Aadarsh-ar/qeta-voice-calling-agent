@@ -5,7 +5,11 @@ import Link from "next/link";
 import { ChevronDown, ArrowRight, Menu, X, PhoneCall, Bot, Sparkles } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 
-export function LandingHeader() {
+interface LandingHeaderProps {
+  onOpenTestAgent?: () => void;
+}
+
+export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
@@ -87,7 +91,17 @@ export function LandingHeader() {
         </nav>
 
         {/* Right: Actions */}
-        <div className="hidden md:flex items-center gap-5">
+        <div className="hidden md:flex items-center gap-4">
+          {onOpenTestAgent && (
+            <button
+              type="button"
+              onClick={onOpenTestAgent}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100/80 transition cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+              <span>Test Live Agent</span>
+            </button>
+          )}
           <Link
             href="/login"
             className="text-[14px] font-medium text-slate-800 hover:text-emerald-800 transition-colors px-2 py-1"
@@ -155,6 +169,19 @@ export function LandingHeader() {
           </nav>
 
           <div className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+            {onOpenTestAgent && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenTestAgent();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 font-semibold text-sm border border-emerald-200 cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                <span>Test Live Voice Agent</span>
+              </button>
+            )}
             <Link
               href="/login"
               onClick={() => setMobileMenuOpen(false)}
