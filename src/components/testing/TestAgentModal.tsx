@@ -15,6 +15,7 @@ import {
   Bot,
   User,
   Zap,
+  Loader2,
 } from "lucide-react";
 
 interface TestTurn {
@@ -23,6 +24,7 @@ interface TestTurn {
   audioBase64?: string;
   latencyMs?: number;
   timestamp: string;
+  isLoadingAudio?: boolean;
 }
 
 interface TestAgentModalProps {
@@ -63,12 +65,17 @@ export function TestAgentModal({
   const [isThinking, setIsThinking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
+  const [isGreetingLoading, setIsGreetingLoading] = useState(false);
+
+  const effectiveGreeting = (initialGreeting || DEFAULT_GREETING).trim();
 
   const [turns, setTurns] = useState<TestTurn[]>([
     {
       role: "ai",
-      text: initialGreeting || DEFAULT_GREETING,
+      text: effectiveGreeting,
       timestamp: "00:00",
+      isLoadingAudio: true,
     },
   ]);
 
@@ -77,8 +84,26 @@ export function TestAgentModal({
   const recognitionRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const greetingAudioRef = useRef<string | null>(null);
 
-  // Play PCM 16-bit 16kHz audio from Cartesia
+  // Synchronously initialize or resume AudioContext on user gesture
+  const ensureAudioContext = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioCtx({ sampleRate: 16000 });
+      }
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+      return audioContextRef.current;
+    } catch (err) {
+      console.warn("[TestAgent] AudioContext error:", err);
+      return null;
+    }
+  }, []);
+
+  // Safely play PCM 16-bit 16kHz audio from Cartesia
   const playPcmAudio = useCallback(
     (base64: string, sampleRate = 16000, onEnded?: () => void) => {
       if (isMuted) {
@@ -87,31 +112,36 @@ export function TestAgentModal({
       }
       try {
         const binary = window.atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        const int16 = new Int16Array(bytes.buffer);
-        const float32 = new Float32Array(int16.length);
-        for (let i = 0; i < int16.length; i++) {
-          float32[i] = int16[i] / 32768.0;
+        const len = binary.length;
+        if (len === 0) {
+          if (onEnded) onEnded();
+          return;
         }
 
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (
-            window.AudioContext ||
-            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-          )({ sampleRate });
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binary.charCodeAt(i);
         }
-        const ctx = audioContextRef.current;
-        if (ctx.state === "suspended") {
-          ctx.resume();
+
+        // Safe PCM decoding using DataView (never throws RangeError on odd byte lengths)
+        const numSamples = Math.floor(len / 2);
+        const float32 = new Float32Array(numSamples);
+        const dataView = new DataView(bytes.buffer, bytes.byteOffset, numSamples * 2);
+        for (let i = 0; i < numSamples; i++) {
+          float32[i] = dataView.getInt16(i * 2, true) / 32768.0;
+        }
+
+        const ctx = ensureAudioContext();
+        if (!ctx) {
+          if (onEnded) onEnded();
+          return;
         }
 
         if (activeSourceRef.current) {
           try {
             activeSourceRef.current.stop();
           } catch {}
+          activeSourceRef.current = null;
         }
 
         const buffer = ctx.createBuffer(1, float32.length, sampleRate);
@@ -129,13 +159,23 @@ export function TestAgentModal({
 
         activeSourceRef.current = source;
         source.start();
+
+        if (ctx.state === "suspended") {
+          ctx.resume().then(() => {
+            setIsAutoplayBlocked(false);
+          }).catch(() => {
+            setIsAutoplayBlocked(true);
+          });
+        } else {
+          setIsAutoplayBlocked(false);
+        }
       } catch (err) {
-        console.warn("PCM audio playback error:", err);
+        console.warn("[TestAgent] PCM audio playback error:", err);
         setIsSpeaking(false);
         if (onEnded) onEnded();
       }
     },
-    [isMuted]
+    [isMuted, ensureAudioContext]
   );
 
   const stopAudio = useCallback(() => {
@@ -170,11 +210,87 @@ export function TestAgentModal({
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, isThinking]);
 
+  // Synthesize and speak the initial greeting whenever the modal is opened
+  useEffect(() => {
+    if (!isOpen) {
+      greetingAudioRef.current = null;
+      return;
+    }
+
+    const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
+    setTurns([
+      {
+        role: "ai",
+        text: greetingText,
+        timestamp: "00:00",
+        isLoadingAudio: true,
+      },
+    ]);
+
+    let isCancelled = false;
+    setIsGreetingLoading(true);
+
+    // Fetch synthesized TTS greeting audio
+    fetch("/api/agent/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId,
+        agentName,
+        cartesiaVoiceId,
+        ttsOnly: true,
+        textToSpeak: greetingText,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (isCancelled) return;
+        setIsGreetingLoading(false);
+        if (data.success && data.audioBase64) {
+          greetingAudioRef.current = data.audioBase64;
+          setTurns((prev) =>
+            prev.map((t, idx) =>
+              idx === 0
+                ? {
+                    ...t,
+                    audioBase64: data.audioBase64,
+                    latencyMs: 120,
+                    isLoadingAudio: false,
+                  }
+                : t
+            )
+          );
+
+          // Automatically speak the greeting aloud
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+        } else {
+          setTurns((prev) =>
+            prev.map((t, idx) => (idx === 0 ? { ...t, isLoadingAudio: false } : t))
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn("[TestAgent] Greeting audio synthesis notice:", err);
+        if (!isCancelled) {
+          setIsGreetingLoading(false);
+          setTurns((prev) =>
+            prev.map((t, idx) => (idx === 0 ? { ...t, isLoadingAudio: false } : t))
+          );
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, agentId, agentName, cartesiaVoiceId, initialGreeting, playPcmAudio]);
+
   // Send turn to backend
   const handleSend = async (textToSend: string) => {
     const cleanText = textToSend.trim();
     if (!cleanText || isThinking) return;
 
+    // Synchronously ensure AudioContext is active on user click
+    ensureAudioContext();
     stopAudio();
     setInputText("");
     setIsThinking(true);
@@ -249,6 +365,7 @@ export function TestAgentModal({
 
   // Toggle Microphone
   const toggleListening = () => {
+    ensureAudioContext();
     if (isListening) {
       if (recognitionRef.current) {
         try {
@@ -302,15 +419,54 @@ export function TestAgentModal({
 
   // Reset conversation
   const handleReset = () => {
+    ensureAudioContext();
     stopAudio();
+    const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
     setTurns([
       {
         role: "ai",
-        text: initialGreeting || DEFAULT_GREETING,
+        text: greetingText,
         timestamp: "00:00",
+        audioBase64: greetingAudioRef.current || undefined,
+        latencyMs: 120,
       },
     ]);
     setCallSeconds(0);
+
+    if (greetingAudioRef.current) {
+      playPcmAudio(greetingAudioRef.current);
+    } else {
+      setIsGreetingLoading(true);
+      fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId,
+          agentName,
+          cartesiaVoiceId,
+          ttsOnly: true,
+          textToSpeak: greetingText,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          setIsGreetingLoading(false);
+          if (d.success && d.audioBase64) {
+            greetingAudioRef.current = d.audioBase64;
+            setTurns([
+              {
+                role: "ai",
+                text: greetingText,
+                timestamp: "00:00",
+                audioBase64: d.audioBase64,
+                latencyMs: 120,
+              },
+            ]);
+            playPcmAudio(d.audioBase64);
+          }
+        })
+        .catch(() => setIsGreetingLoading(false));
+    }
   };
 
   const formatDuration = (sec: number) => {
@@ -339,7 +495,7 @@ export function TestAgentModal({
                   {agentName}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Cartesia Voice
+                  Cartesia Sonic
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
@@ -349,7 +505,15 @@ export function TestAgentModal({
                 </span>
                 <span>•</span>
                 <span className="text-[11px] text-slate-500 font-medium">
-                  {isSpeaking ? "Speaking..." : isThinking ? "Thinking..." : isListening ? "Listening..." : "Ready"}
+                  {isSpeaking
+                    ? "Speaking..."
+                    : isThinking
+                    ? "Thinking..."
+                    : isListening
+                    ? "Listening..."
+                    : isGreetingLoading
+                    ? "Synthesizing voice..."
+                    : "Ready"}
                 </span>
               </div>
             </div>
@@ -357,7 +521,11 @@ export function TestAgentModal({
 
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={() => {
+                ensureAudioContext();
+                setIsMuted(!isMuted);
+                if (!isMuted) stopAudio();
+              }}
               className={`p-2 rounded-xl border transition ${
                 isMuted
                   ? "bg-rose-50 text-rose-600 border-rose-200"
@@ -383,6 +551,28 @@ export function TestAgentModal({
             </button>
           </div>
         </div>
+
+        {/* Autoplay Unlock Notice (if browser blocked auto audio playback) */}
+        {isAutoplayBlocked && turns[0]?.audioBase64 && (
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900 font-medium shrink-0 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-amber-700 animate-bounce" />
+              <span>Audio autoplay was paused by your browser. Click to hear the agent speak:</span>
+            </div>
+            <button
+              onClick={() => {
+                ensureAudioContext();
+                if (turns[0]?.audioBase64) {
+                  playPcmAudio(turns[0].audioBase64);
+                }
+                setIsAutoplayBlocked(false);
+              }}
+              className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition shrink-0"
+            >
+              Play Voice
+            </button>
+          </div>
+        )}
 
         {/* Live Audio Visualizer Banner when speaking */}
         {isSpeaking && (
@@ -433,20 +623,33 @@ export function TestAgentModal({
                     }`}
                   >
                     <span>{turn.timestamp}</span>
-                    {isAi && turn.audioBase64 && (
-                      <button
-                        onClick={() => playPcmAudio(turn.audioBase64!)}
-                        className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-800"
-                      >
-                        <Play className="w-2.5 h-2.5 fill-current" />
-                        Replay
-                      </button>
-                    )}
-                    {turn.latencyMs && (
-                      <span className="font-mono text-emerald-600 font-semibold inline-flex items-center gap-0.5">
-                        <Zap className="w-2.5 h-2.5" />
-                        {(turn.latencyMs / 1000).toFixed(2)}s
-                      </span>
+                    {isAi && (
+                      <div className="flex items-center gap-2">
+                        {turn.audioBase64 ? (
+                          <button
+                            onClick={() => {
+                              ensureAudioContext();
+                              playPcmAudio(turn.audioBase64!);
+                            }}
+                            className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-800 transition"
+                          >
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>{isSpeaking ? "Playing..." : "Replay"}</span>
+                          </button>
+                        ) : turn.isLoadingAudio ? (
+                          <span className="inline-flex items-center gap-1 text-slate-400">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            <span>Generating voice...</span>
+                          </span>
+                        ) : null}
+
+                        {turn.latencyMs && (
+                          <span className="font-mono text-emerald-600 font-semibold inline-flex items-center gap-0.5">
+                            <Zap className="w-2.5 h-2.5" />
+                            {(turn.latencyMs / 1000).toFixed(2)}s
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -482,7 +685,10 @@ export function TestAgentModal({
           {QUICK_PROMPTS.map((prompt, i) => (
             <button
               key={i}
-              onClick={() => handleSend(prompt)}
+              onClick={() => {
+                ensureAudioContext();
+                handleSend(prompt);
+              }}
               disabled={isThinking}
               className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 text-[11px] font-medium border border-slate-200 hover:border-indigo-200 transition shrink-0 disabled:opacity-50"
             >
@@ -496,6 +702,7 @@ export function TestAgentModal({
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              ensureAudioContext();
               handleSend(inputText);
             }}
             className="flex items-center gap-2"

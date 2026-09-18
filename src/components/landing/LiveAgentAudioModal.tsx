@@ -43,9 +43,102 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const isWorkerSubscribedRef = useRef<boolean>(false);
+
+  // Synchronously initialize / resume AudioContext on user gesture
+  const ensureAudioContext = useCallback(() => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioCtx({ sampleRate: 16000 });
+      }
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+      return audioContextRef.current;
+    } catch (err) {
+      console.warn("[LiveAgent] AudioContext init error:", err);
+      return null;
+    }
+  }, []);
+
+  // Safe PCM 16-bit 16kHz audio player (Cartesia TTS)
+  const playPcmAudio = useCallback(
+    (base64: string, sampleRate = 16000, onEnded?: () => void) => {
+      try {
+        const binary = window.atob(base64);
+        const len = binary.length;
+        if (len === 0) {
+          if (onEnded) onEnded();
+          return;
+        }
+
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+
+        const numSamples = Math.floor(len / 2);
+        const float32 = new Float32Array(numSamples);
+        const dataView = new DataView(bytes.buffer, bytes.byteOffset, numSamples * 2);
+        for (let i = 0; i < numSamples; i++) {
+          float32[i] = dataView.getInt16(i * 2, true) / 32768.0;
+        }
+
+        const ctx = ensureAudioContext();
+        if (!ctx) {
+          if (onEnded) onEnded();
+          return;
+        }
+
+        if (activeSourceRef.current) {
+          try {
+            activeSourceRef.current.stop();
+          } catch {}
+          activeSourceRef.current = null;
+        }
+
+        const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+        buffer.getChannelData(0).set(float32);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+
+        setState("speaking");
+        source.onended = () => {
+          activeSourceRef.current = null;
+          if (isCallActiveRef.current) {
+            setState("listening");
+          }
+          if (onEnded) onEnded();
+        };
+
+        activeSourceRef.current = source;
+        source.start();
+
+        if (ctx.state === "suspended") {
+          ctx.resume().catch(() => {});
+        }
+      } catch (err) {
+        console.warn("[LiveAgent] PCM audio playback error:", err);
+        if (onEnded) onEnded();
+      }
+    },
+    [ensureAudioContext]
+  );
 
   // Stop / interrupt agent audio
   const stopAgentAudio = useCallback(() => {
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.stop();
+      } catch {}
+      activeSourceRef.current = null;
+    }
     if (audioElementRef.current) {
       audioElementRef.current.pause();
       audioElementRef.current.currentTime = 0;
@@ -56,6 +149,21 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
   // Clean teardown
   const terminateSession = useCallback(() => {
     isCallActiveRef.current = false;
+    isWorkerSubscribedRef.current = false;
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.stop();
+      } catch {}
+      activeSourceRef.current = null;
+    }
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -102,8 +210,86 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     };
   }, [isOpen, terminateSession]);
 
-  // Start the voice-only session using LiveKit WebRTC
+  // Handle conversational turn for direct voice response
+  const triggerVoiceTurn = useCallback(
+    async (userUtterance: string) => {
+      if (!isCallActiveRef.current || isWorkerSubscribedRef.current) return;
+
+      stopAgentAudio();
+      setState("connecting");
+
+      try {
+        const res = await fetch("/api/agent/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId: "agent_WzcEn6kkRmPxAfBNHzvpa1",
+            agentName: "Harika (Telugu Faculty Voice)",
+            cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+            userMessage: userUtterance,
+            conversationHistory: [],
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.rawReply) {
+          setAgentSpokenText(data.rawReply);
+          if (data.audioBase64) {
+            playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+          } else {
+            setState("listening");
+          }
+        } else {
+          setState("listening");
+        }
+      } catch (err) {
+        console.warn("[LiveAgent] Voice turn note:", err);
+        setState("listening");
+      }
+    },
+    [playPcmAudio, stopAgentAudio]
+  );
+
+  // Setup Continuous Browser Speech Recognition for voice barge-in
+  const setupSpeechRecognition = useCallback(() => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) return;
+
+    try {
+      const rec = new SpeechRec();
+      rec.lang = "te-IN";
+      rec.continuous = true;
+      rec.interimResults = false;
+
+      rec.onresult = (event: any) => {
+        if (!isCallActiveRef.current) return;
+        const lastResultIndex = event.results.length - 1;
+        const transcript = event.results[lastResultIndex][0].transcript.trim();
+        if (transcript) {
+          console.log("[LiveAgent Mic Transcript]:", transcript);
+          triggerVoiceTurn(transcript);
+        }
+      };
+
+      rec.onerror = () => {};
+      rec.onend = () => {
+        if (isCallActiveRef.current && recognitionRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch {}
+        }
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (recErr) {
+      console.warn("[LiveAgent] SpeechRec setup note:", recErr);
+    }
+  }, [triggerVoiceTurn]);
+
+  // Start the voice session with both WebRTC and instant TTS fallback
   const startVoiceCall = async () => {
+    ensureAudioContext();
     setErrorMessage("");
     setAgentSpokenText("");
     setState("requesting_mic");
@@ -122,99 +308,129 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
 
       setState("connecting");
       isCallActiveRef.current = true;
+      isWorkerSubscribedRef.current = false;
 
-      // 2. Initialize LiveKit Room
-      const room = new Room({
-        adaptiveStream: true,
-        dynacast: true,
-        audioCaptureDefaults: {
-          autoGainControl: true,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      roomRef.current = room;
+      const greetingText =
+        sessionData.greeting ||
+        "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి కాలేజ్ అటెండెన్స్ గురించి కాల్ చేశాను.";
 
-      // Attach track subscription handler (plays incoming Agent audio)
-      room.on(
-        RoomEvent.TrackSubscribed,
-        (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
-          if (track.kind === Track.Kind.Audio) {
-            console.log(`[LiveKit WebRTC] Subscribed to audio track from ${participant.identity}`);
-            if (audioElementRef.current) {
-              track.attach(audioElementRef.current);
-            } else {
-              const audioEl = track.attach();
-              audioEl.autoplay = true;
-              audioEl.setAttribute("playsinline", "true");
-            }
-            setState("speaking");
+      // 2. Synthesize and speak the greeting immediately via Cartesia TTS
+      fetch("/api/agent/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: "agent_WzcEn6kkRmPxAfBNHzvpa1",
+          agentName: "Harika (Telugu Faculty Voice)",
+          cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+          ttsOnly: true,
+          textToSpeak: greetingText,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!isCallActiveRef.current) return;
+          if (d.success && d.audioBase64) {
+            setAgentSpokenText(greetingText);
+            playPcmAudio(d.audioBase64, d.sampleRate || 16000);
           }
-        }
-      );
+        })
+        .catch((e) => console.warn("[LiveAgent] Greeting synthesis note:", e));
 
-      // Track active speakers for UI pulse
-      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-        if (!isCallActiveRef.current) return;
-        const agentSpeaking = speakers.some((s) => s.identity !== room.localParticipant.identity);
-        const userSpeaking = speakers.some((s) => s.identity === room.localParticipant.identity);
-
-        if (agentSpeaking) {
-          setState("speaking");
-        } else if (userSpeaking || speakers.length === 0) {
-          setState("listening");
-        }
-      });
-
-      // Track disconnection
-      room.on(RoomEvent.Disconnected, () => {
-        if (isCallActiveRef.current) {
-          setState("idle");
-          isCallActiveRef.current = false;
-        }
-      });
-
-      // 3. Connect to LiveKit Cloud Room
-      await room.connect(sessionData.livekitUrl, sessionData.token);
-      console.log(`[LiveKit WebRTC] Connected to room ${room.name}`);
-
-      // 4. Publish Microphone Track
-      await room.localParticipant.setMicrophoneEnabled(true);
-      console.log("[LiveKit WebRTC] Microphone enabled");
-
-      // Setup local audio analyser for volume visualizer
+      // 3. Initialize LiveKit Room for WebRTC
       try {
-        const localTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
-        if (localTrack?.mediaStreamTrack) {
-          const stream = new MediaStream([localTrack.mediaStreamTrack]);
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioCtx();
-          const src = ctx.createMediaStreamSource(stream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 256;
-          src.connect(analyser);
-          audioContextRef.current = ctx;
-          analyserRef.current = analyser;
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+          audioCaptureDefaults: {
+            autoGainControl: true,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
+        roomRef.current = room;
 
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const updateVolume = () => {
-            if (!isCallActiveRef.current) return;
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
+        room.on(
+          RoomEvent.TrackSubscribed,
+          (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+            if (track.kind === Track.Kind.Audio) {
+              console.log(`[LiveKit WebRTC] Subscribed to audio track from ${participant.identity}`);
+              isWorkerSubscribedRef.current = true;
+              if (activeSourceRef.current) {
+                try {
+                  activeSourceRef.current.stop();
+                } catch {}
+              }
+              if (audioElementRef.current) {
+                track.attach(audioElementRef.current);
+                audioElementRef.current.play().catch(() => {});
+              }
+              setState("speaking");
             }
-            const avg = sum / dataArray.length;
-            setMicVolume(Math.min(1, avg / 80));
-            animationFrameRef.current = requestAnimationFrame(updateVolume);
-          };
-          updateVolume();
+          }
+        );
+
+        room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          if (!isCallActiveRef.current || !isWorkerSubscribedRef.current) return;
+          const agentSpeaking = speakers.some((s) => s.identity !== room.localParticipant.identity);
+          const userSpeaking = speakers.some((s) => s.identity === room.localParticipant.identity);
+
+          if (agentSpeaking) {
+            setState("speaking");
+          } else if (userSpeaking || speakers.length === 0) {
+            setState("listening");
+          }
+        });
+
+        room.on(RoomEvent.Disconnected, () => {
+          if (isCallActiveRef.current && isWorkerSubscribedRef.current) {
+            setState("idle");
+            isCallActiveRef.current = false;
+          }
+        });
+
+        // Connect to LiveKit Cloud Room
+        await room.connect(sessionData.livekitUrl, sessionData.token);
+        console.log(`[LiveKit WebRTC] Connected to room ${room.name}`);
+
+        // Enable microphone
+        await room.localParticipant.setMicrophoneEnabled(true);
+
+        // Setup local audio analyser for visualizer
+        try {
+          const localTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
+          if (localTrack?.mediaStreamTrack) {
+            const stream = new MediaStream([localTrack.mediaStreamTrack]);
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            const ctx = new AudioCtx();
+            const src = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            src.connect(analyser);
+            analyserRef.current = analyser;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const updateVolume = () => {
+              if (!isCallActiveRef.current) return;
+              analyser.getByteFrequencyData(dataArray);
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+              const avg = sum / dataArray.length;
+              setMicVolume(Math.min(1, avg / 80));
+              animationFrameRef.current = requestAnimationFrame(updateVolume);
+            };
+            updateVolume();
+          }
+        } catch (analyserErr) {
+          console.warn("[Visualizer] Analyser setup note:", analyserErr);
         }
-      } catch (analyserErr) {
-        console.warn("[Visualizer] Analyser setup skipped:", analyserErr);
+      } catch (lkErr) {
+        console.warn("[LiveKit Room Note]: Continuing in browser audio mode", lkErr);
       }
 
-      setState("listening");
+      // Start continuous speech recognition for spoken conversation
+      setupSpeechRecognition();
     } catch (err: unknown) {
       console.error("[StartVoiceCall Error]", err);
       setErrorMessage(err instanceof Error ? err.message : "Could not connect to live voice agent");
@@ -327,7 +543,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 <button
                   type="button"
                   onClick={startVoiceCall}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.99] group"
+                  className="w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all active:scale-[0.99] group cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current transition-transform group-hover:scale-110" />
                   <span>Start Voice Call</span>
@@ -366,12 +582,12 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
               </div>
               <div>
                 <h4 className="font-heading text-sm font-bold text-slate-900">
-                  {state === "requesting_mic" ? "Requesting Microphone Access" : "Connecting to Voice Agent"}
+                  {state === "requesting_mic" ? "Requesting Microphone Access" : "Connecting with Harika"}
                 </h4>
                 <p className="text-xs text-slate-500 mt-1">
                   {state === "requesting_mic"
                     ? "Please allow microphone permission to talk."
-                    : "Establishing ultra-low latency WebRTC stream..."}
+                    : "Establishing neural voice session..."}
                 </p>
               </div>
             </div>
@@ -465,6 +681,24 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                   </p>
                 </div>
               )}
+
+              {/* Quick sample prompts you can click */}
+              <div className="flex flex-wrap justify-center gap-1.5 max-w-sm pt-2">
+                {[
+                  "కాలేజ్ అటెండెన్స్ రూల్స్ ఏమిటి?",
+                  "ఫీజు డ్యూస్ ఎప్పుడు చెల్లించాలి?",
+                  "Can you speak in English?",
+                ].map((promptText, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => triggerVoiceTurn(promptText)}
+                    className="px-2.5 py-1 rounded-full bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 text-[11px] font-medium border border-slate-200 hover:border-emerald-300 transition shadow-xs"
+                  >
+                    &ldquo;{promptText}&rdquo;
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -552,7 +786,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
             Open Console <ArrowRight className="w-3 h-3" />
           </Link>
           <span className="text-[10px] text-slate-400 flex items-center gap-1">
-            <Radio className="w-2.5 h-2.5 text-emerald-500" /> LiveKit WebRTC Full-Duplex Audio
+            <Radio className="w-2.5 h-2.5 text-emerald-500" /> Live Neural Voice Stream
           </span>
         </div>
       </div>
