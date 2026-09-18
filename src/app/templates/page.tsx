@@ -561,6 +561,8 @@ export default function TemplatesPage() {
       <LiveAgentAudioModal
         isOpen={isAudioModalOpen}
         onClose={() => setIsAudioModalOpen(false)}
+        agentId="agent_WzcEn6kkRmPxAfBNHzvpa1"
+        agentName="Sam (Voice Intelligence Agent)"
       />
 
       {/* Inspect Template System Prompt & Tools Modal */}

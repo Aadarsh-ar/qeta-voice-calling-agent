@@ -982,6 +982,147 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Browser Direct Cartesia Agent Stream (Zero-Latency Web Voice Bridge)
+// Directly connects browser client to Cartesia Agent WebSocket in < 150ms.
+// Eliminates WebRTC signaling lag, LiveKit dependencies, and SpeechRecognition delays.
+// ──────────────────────────────────────────────────────────────────────────────
+async function handleBrowserCartesiaStream(clientWs, agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1") {
+  const apiKey = process.env.CARTESIA_API_KEY || "";
+  if (!apiKey) {
+    console.error("[BROWSER_CARTESIA] No CARTESIA_API_KEY found.");
+    if (clientWs.readyState === 1) {
+      clientWs.send(JSON.stringify({ event: "error", error: "Missing Cartesia API key" }));
+      clientWs.close(1011, "Missing API key");
+    }
+    return;
+  }
+
+  const targetAgentId = (agentId && typeof agentId === "string" && agentId.startsWith("agent_"))
+    ? agentId
+    : "agent_WzcEn6kkRmPxAfBNHzvpa1";
+
+  console.log(`[BROWSER_CARTESIA] Connecting browser directly to Cartesia Agent stream: ${targetAgentId}`);
+
+  const { WebSocket: NodeWS } = await import("ws");
+  const cartesiaWsUrl = `wss://api.cartesia.ai/agents/stream/${targetAgentId}?cartesia_version=2026-08-14&api_key=${encodeURIComponent(apiKey)}`;
+  const cartesiaWs = new NodeWS(cartesiaWsUrl, {
+    headers: {
+      "Cartesia-Version": "2026-08-14",
+    },
+  });
+
+  const streamId = `web_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  let isCartesiaReady = false;
+  const pendingQueue = [];
+
+  const pingInterval = setInterval(() => {
+    if (cartesiaWs.readyState === 1) cartesiaWs.ping();
+    if (clientWs.readyState === 1) clientWs.ping();
+  }, 25000);
+
+  cartesiaWs.on("open", () => {
+    console.log(`[BROWSER_CARTESIA] Connected to Cartesia Agent ${targetAgentId} in zero-latency mode`);
+    try {
+      cartesiaWs.send(
+        JSON.stringify({
+          event: "start",
+          stream_id: streamId,
+          config: {
+            input_format: "pcm_16000",
+            output_audio_delivery: "speaking_pace",
+          },
+        })
+      );
+      isCartesiaReady = true;
+
+      if (clientWs.readyState === 1) {
+        clientWs.send(JSON.stringify({ event: "connected", agentId: targetAgentId, streamId }));
+      }
+
+      while (pendingQueue.length > 0) {
+        const payload = pendingQueue.shift();
+        cartesiaWs.send(
+          JSON.stringify({
+            event: "media",
+            stream_id: streamId,
+            media: { payload },
+          })
+        );
+      }
+    } catch (err) {
+      console.warn("[BROWSER_CARTESIA] Error sending start event:", err.message);
+    }
+  });
+
+  cartesiaWs.on("message", (raw) => {
+    try {
+      if (clientWs.readyState === 1) {
+        clientWs.send(raw.toString());
+      }
+    } catch (err) {
+      console.warn("[BROWSER_CARTESIA] Error forwarding Cartesia message to client:", err.message);
+    }
+  });
+
+  cartesiaWs.on("error", (err) => {
+    console.error("[BROWSER_CARTESIA] Cartesia WebSocket error:", err.message);
+    if (clientWs.readyState === 1) {
+      clientWs.send(JSON.stringify({ event: "error", error: err.message }));
+    }
+  });
+
+  cartesiaWs.on("close", (code, reason) => {
+    const rStr = reason?.toString() || "";
+    console.log(`[BROWSER_CARTESIA] Cartesia WebSocket closed: ${code} ${rStr}`);
+    clearInterval(pingInterval);
+    if (clientWs.readyState === 1) {
+      clientWs.close(code, rStr);
+    }
+  });
+
+  clientWs.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      const event = msg.event || msg.type;
+
+      if (event === "media" || event === "audio_input") {
+        const payload = msg.media?.payload || msg.payload || msg.data || msg.audio;
+        if (!payload) return;
+
+        if (!isCartesiaReady || cartesiaWs.readyState !== 1) {
+          pendingQueue.push(payload);
+          return;
+        }
+
+        cartesiaWs.send(
+          JSON.stringify({
+            event: "media",
+            stream_id: streamId,
+            media: { payload },
+          })
+        );
+      } else if (event === "interrupt" || event === "clearAudio") {
+        if (cartesiaWs.readyState === 1) {
+          cartesiaWs.send(JSON.stringify({ event: "interrupt", stream_id: streamId }));
+        }
+      }
+    } catch (err) {
+      console.warn("[BROWSER_CARTESIA] Error forwarding client message:", err.message);
+    }
+  });
+
+  clientWs.on("close", () => {
+    console.log("[BROWSER_CARTESIA] Browser client disconnected");
+    clearInterval(pingInterval);
+    if (cartesiaWs.readyState === 1 || cartesiaWs.readyState === 0) {
+      try {
+        cartesiaWs.close();
+      } catch {}
+    }
+  });
+}
+
 // sendAudioToVobizRaw — sends standard 320-byte (40ms @ 8000Hz G.711 PCMU) RTP audio blocks
 function sendAudioToVobizRaw(ws, streamId, audioBuf) {
   if (!ws || ws.readyState !== 1 || !streamId || !audioBuf || audioBuf.length === 0) return;
@@ -1612,10 +1753,19 @@ server.on("upgrade", (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => {
       handleVobizStream(ws, agentId, callerNumber);
     });
+  } else if (url === "/api/cartesia/stream" || url.startsWith("/api/cartesia/stream?") || url === "/api/cartesia/stream/") {
+    let agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1";
+    try {
+      const parsedUrl = new URL(url, `http://localhost:${port}`);
+      agentId = parsedUrl.searchParams.get("agentId") || agentId;
+    } catch {}
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleBrowserCartesiaStream(ws, agentId);
+    });
   }
 });
 
-// Intercept server.emit('upgrade') so /api/vobiz/stream is handled exclusively
+// Intercept server.emit('upgrade') so /api/vobiz/stream and /api/cartesia/stream are handled exclusively
 // and Next.js internal upgrade handler cannot destroy our socket
 const originalEmit = server.emit;
 server.emit = function (event, ...args) {
@@ -1629,6 +1779,18 @@ server.emit = function (event, ...args) {
       const { agentId, callerNumber } = getStreamParams(req);
       wss.handleUpgrade(req, socket, head, (ws) => {
         handleVobizStream(ws, agentId, callerNumber);
+      });
+      return true; // Exclusively handled! Stop Next.js from destroying socket.
+    }
+
+    if (url === "/api/cartesia/stream" || url.startsWith("/api/cartesia/stream?") || url === "/api/cartesia/stream/") {
+      let agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1";
+      try {
+        const parsedUrl = new URL(url, `http://localhost:${port}`);
+        agentId = parsedUrl.searchParams.get("agentId") || agentId;
+      } catch {}
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleBrowserCartesiaStream(ws, agentId);
       });
       return true; // Exclusively handled! Stop Next.js from destroying socket.
     }

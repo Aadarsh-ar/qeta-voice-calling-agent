@@ -370,6 +370,8 @@ export default function HomePage() {
       <LiveAgentAudioModal
         isOpen={isAudioModalOpen}
         onClose={() => setIsAudioModalOpen(false)}
+        agentId="agent_WzcEn6kkRmPxAfBNHzvpa1"
+        agentName="Sam (Personal Assistant)"
       />
     </div>
   );
