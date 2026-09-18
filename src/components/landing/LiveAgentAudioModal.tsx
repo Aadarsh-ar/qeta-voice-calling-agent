@@ -14,6 +14,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import Link from "next/link";
+import { Room, RoomEvent, Track, RemoteParticipant, RemoteTrackPublication, RemoteTrack } from "livekit-client";
 
 interface Props {
   isOpen: boolean;
@@ -29,123 +30,48 @@ type ConvState =
   | "interrupted"
   | "error";
 
-// Pre-computed G.711 mu-law to Float32 lookup table for low-latency decoding
-const ULAW_TABLE = new Float32Array(256);
-for (let i = 0; i < 256; i++) {
-  const u = ~i;
-  const sign = u & 0x80;
-  const exponent = (u >> 4) & 0x07;
-  const mantissa = u & 0x0f;
-  let sample = ((mantissa << 1) + 33) << (exponent + 2);
-  sample -= 132;
-  ULAW_TABLE[i] = (sign !== 0 ? -sample : sample) / 32768.0;
-}
-
-function decodeMuLaw(uint8: Uint8Array): Float32Array {
-  const out = new Float32Array(uint8.length);
-  for (let i = 0; i < uint8.length; i++) {
-    out[i] = ULAW_TABLE[uint8[i]];
-  }
-  return out;
-}
-
-function encodeMuLawSample(sample: number): number {
-  const BIAS = 132;
-  const CLIP = 32635;
-  let pcm = Math.round(Math.max(-1, Math.min(1, sample)) * 32767);
-  const sign = pcm < 0 ? 0x80 : 0;
-  if (sign) pcm = -pcm;
-  if (pcm > CLIP) pcm = CLIP;
-  pcm += BIAS;
-
-  let exponent = 7;
-  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
-    exponent--;
-  }
-  const mantissa = (pcm >> (exponent + 3)) & 0x0f;
-  return (~(sign | (exponent << 4) | mantissa)) & 0xff;
-}
-
-function uint8ToBase64(uint8: Uint8Array): string {
-  let binary = "";
-  const len = uint8.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(uint8[i]);
-  }
-  return window.btoa(binary);
-}
-
-function base64ToUint8(base64: string): Uint8Array {
-  const bin = window.atob(base64);
-  const len = bin.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = bin.charCodeAt(i);
-  }
-  return bytes;
-}
-
 export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
   const [state, setState] = useState<ConvState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [agentSpokenText, setAgentSpokenText] = useState("");
   const [micVolume, setMicVolume] = useState(0);
 
-  // Audio nodes and references
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextStartTimeRef = useRef<number>(0);
-  const isAgentSpeakingRef = useRef<boolean>(false);
+  // LiveKit Room ref and audio output ref
+  const roomRef = useRef<Room | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const isCallActiveRef = useRef<boolean>(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
-  // Stop active audio playback immediately (instant barge-in / clear)
+  // Stop / interrupt agent audio
   const stopAgentAudio = useCallback(() => {
-    activeSourcesRef.current.forEach((src) => {
-      try {
-        src.stop();
-        src.disconnect();
-      } catch {}
-    });
-    activeSourcesRef.current = [];
-    if (audioContextRef.current) {
-      nextStartTimeRef.current = audioContextRef.current.currentTime;
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
     }
-    isAgentSpeakingRef.current = false;
+    setState("listening");
   }, []);
 
-  // Teardown everything cleanly
+  // Clean teardown
   const terminateSession = useCallback(() => {
     isCallActiveRef.current = false;
-    stopAgentAudio();
 
-    if (wsRef.current) {
-      try {
-        wsRef.current.close(1000, "User ended call");
-      } catch {}
-      wsRef.current = null;
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
-    if (workletNodeRef.current) {
+    if (roomRef.current) {
       try {
-        workletNodeRef.current.disconnect();
+        roomRef.current.disconnect();
       } catch {}
-      workletNodeRef.current = null;
+      roomRef.current = null;
     }
 
-    if (scriptProcessorRef.current) {
-      try {
-        scriptProcessorRef.current.disconnect();
-      } catch {}
-      scriptProcessorRef.current = null;
-    }
-
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.srcObject = null;
     }
 
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
@@ -158,7 +84,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     setState("idle");
     setMicVolume(0);
     setAgentSpokenText("");
-  }, [stopAgentAudio]);
+  }, []);
 
   // Handle modal close
   const handleClose = () => {
@@ -166,7 +92,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     onClose();
   };
 
-  // Ensure teardown on unmount or when modal closes
+  // Teardown on unmount or when modal closes
   useEffect(() => {
     if (!isOpen) {
       terminateSession();
@@ -176,222 +102,122 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
     };
   }, [isOpen, terminateSession]);
 
-  // Start the voice-only session
+  // Start the voice-only session using LiveKit WebRTC
   const startVoiceCall = async () => {
     setErrorMessage("");
     setAgentSpokenText("");
     setState("requesting_mic");
 
     try {
-      // 1. Initialize AudioContext directly inside user click handler (required for mobile autoplay)
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioCtx = new AudioCtx({ sampleRate: 48000 });
-      if (audioCtx.state === "suspended") {
-        await audioCtx.resume();
-      }
-      audioContextRef.current = audioCtx;
-      nextStartTimeRef.current = audioCtx.currentTime;
-
-      // 2. Request mic access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      micStreamRef.current = stream;
-
-      setState("connecting");
-      isCallActiveRef.current = true;
-
-      // 3. Request short-lived Cartesia connection token
+      // 1. Request short-lived LiveKit token from QETA control plane
       const sessionRes = await fetch("/api/demo/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
       const sessionData = await sessionRes.json();
 
-      if (!sessionRes.ok || !sessionData.success || !sessionData.wsUrl) {
-        throw new Error(sessionData.error || "Failed to initialize voice session");
+      if (!sessionRes.ok || !sessionData.success || !sessionData.token) {
+        throw new Error(sessionData.error || "Failed to initialize live voice session");
       }
 
-      // 4. Establish Cartesia Agent WebSocket
-      const ws = new WebSocket(sessionData.wsUrl);
-      wsRef.current = ws;
+      setState("connecting");
+      isCallActiveRef.current = true;
 
-      ws.onopen = () => {
-        if (!isCallActiveRef.current) {
-          ws.close();
-          return;
-        }
+      // 2. Initialize LiveKit Room
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      roomRef.current = room;
 
-        // Send Cartesia start event
-        ws.send(
-          JSON.stringify({
-            event: "start",
-            config: {
-              input_format: "mulaw_8000",
-              output_audio_delivery: "speaking_pace",
-            },
-          })
-        );
-      };
-
-      ws.onmessage = (event) => {
-        if (!isCallActiveRef.current) return;
-
-        try {
-          const msg = JSON.parse(event.data);
-
-          if (msg.event === "ack") {
-            setState("listening");
-          } else if (msg.event === "turn_started") {
-            isAgentSpeakingRef.current = true;
+      // Attach track subscription handler (plays incoming Agent audio)
+      room.on(
+        RoomEvent.TrackSubscribed,
+        (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+          if (track.kind === Track.Kind.Audio) {
+            console.log(`[LiveKit WebRTC] Subscribed to audio track from ${participant.identity}`);
+            if (audioElementRef.current) {
+              track.attach(audioElementRef.current);
+            } else {
+              const audioEl = track.attach();
+              audioEl.autoplay = true;
+              audioEl.setAttribute("playsinline", "true");
+            }
             setState("speaking");
-          } else if (msg.event === "turn_output_text_delta") {
-            const delta = msg.turn_output_text_delta?.text || "";
-            if (delta) {
-              setAgentSpokenText((prev) => prev + delta);
-            }
-          } else if (msg.event === "media_output") {
-            const payload = msg.media?.payload;
-            if (payload && audioContextRef.current) {
-              const rawBytes = base64ToUint8(payload);
-              const float32Audio = decodeMuLaw(rawBytes);
-
-              // Schedule audio buffer
-              const buffer = audioCtx.createBuffer(1, float32Audio.length, 8000);
-              buffer.getChannelData(0).set(float32Audio);
-
-              const source = audioCtx.createBufferSource();
-              source.buffer = buffer;
-              source.connect(audioCtx.destination);
-
-              const now = audioCtx.currentTime;
-              const startTime = Math.max(now, nextStartTimeRef.current);
-              source.start(startTime);
-              nextStartTimeRef.current = startTime + buffer.duration;
-
-              activeSourcesRef.current.push(source);
-              source.onended = () => {
-                const idx = activeSourcesRef.current.indexOf(source);
-                if (idx !== -1) activeSourcesRef.current.splice(idx, 1);
-                if (activeSourcesRef.current.length === 0) {
-                  isAgentSpeakingRef.current = false;
-                  if (isCallActiveRef.current) {
-                    setState("listening");
-                  }
-                }
-              };
-            }
-          } else if (msg.event === "turn_interrupted" || msg.event === "audio_output_clear") {
-            stopAgentAudio();
-            setState("listening");
-          } else if (msg.event === "error") {
-            console.error("[Cartesia WS Error]", msg);
           }
-        } catch (e) {
-          console.error("[Cartesia WS Parse Error]", e);
         }
-      };
+      );
 
-      ws.onerror = (err) => {
-        console.error("[Cartesia WS Error]", err);
+      // Track active speakers for UI pulse
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        if (!isCallActiveRef.current) return;
+        const agentSpeaking = speakers.some((s) => s.identity !== room.localParticipant.identity);
+        const userSpeaking = speakers.some((s) => s.identity === room.localParticipant.identity);
+
+        if (agentSpeaking) {
+          setState("speaking");
+        } else if (userSpeaking || speakers.length === 0) {
+          setState("listening");
+        }
+      });
+
+      // Track disconnection
+      room.on(RoomEvent.Disconnected, () => {
         if (isCallActiveRef.current) {
-          setErrorMessage("Live voice connection interrupted.");
-          setState("error");
+          setState("idle");
+          isCallActiveRef.current = false;
         }
-      };
+      });
 
-      ws.onclose = (e) => {
-        if (isCallActiveRef.current && e.code !== 1000) {
-          setErrorMessage("Voice stream ended.");
-          setState("error");
-        }
-      };
+      // 3. Connect to LiveKit Cloud Room
+      await room.connect(sessionData.livekitUrl, sessionData.token);
+      console.log(`[LiveKit WebRTC] Connected to room ${room.name}`);
 
-      // 5. Connect Microphone to Downsampling AudioWorklet
-      const micSource = audioCtx.createMediaStreamSource(stream);
+      // 4. Publish Microphone Track
+      await room.localParticipant.setMicrophoneEnabled(true);
+      console.log("[LiveKit WebRTC] Microphone enabled");
 
-      let workletLoaded = false;
+      // Setup local audio analyser for volume visualizer
       try {
-        await audioCtx.audioWorklet.addModule("/audio-processor.js");
-        const workletNode = new AudioWorkletNode(audioCtx, "live-audio-processor");
-        workletNodeRef.current = workletNode;
+        const localTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
+        if (localTrack?.mediaStreamTrack) {
+          const stream = new MediaStream([localTrack.mediaStreamTrack]);
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AudioCtx();
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 256;
+          src.connect(analyser);
+          audioContextRef.current = ctx;
+          analyserRef.current = analyser;
 
-        workletNode.port.onmessage = (e) => {
-          if (!isCallActiveRef.current) return;
-          const { type, buffer, volume } = e.data;
-
-          if (type === "volume" && typeof volume === "number") {
-            setMicVolume(volume);
-          } else if (type === "audio_data" && buffer && wsRef.current?.readyState === WebSocket.OPEN) {
-            // While agent is outputting voice, avoid transmitting room echo
-            if (isAgentSpeakingRef.current) return;
-
-            const u8 = new Uint8Array(buffer);
-            const b64 = uint8ToBase64(u8);
-            wsRef.current.send(
-              JSON.stringify({
-                event: "media",
-                media: {
-                  payload: b64,
-                },
-              })
-            );
-          }
-        };
-
-        micSource.connect(workletNode);
-        workletLoaded = true;
-      } catch (workletErr) {
-        console.warn("[Worklet Fallback] Using ScriptProcessorNode:", workletErr);
-      }
-
-      // Fallback for browsers with AudioWorklet restrictions
-      if (!workletLoaded) {
-        const scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
-        scriptProcessorRef.current = scriptNode;
-
-        const targetSampleRate = 8000;
-        const ratio = audioCtx.sampleRate / targetSampleRate;
-        let accumulator: number[] = [];
-
-        scriptNode.onaudioprocess = (e) => {
-          if (!isCallActiveRef.current) return;
-          const input = e.inputBuffer.getChannelData(0);
-
-          let sumSq = 0;
-          for (let i = 0; i < input.length; i += ratio) {
-            const sample = input[Math.floor(i)] || 0;
-            sumSq += sample * sample;
-            accumulator.push(encodeMuLawSample(sample));
-
-            if (accumulator.length >= 320) {
-              if (!isAgentSpeakingRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-                const chunk = new Uint8Array(accumulator.slice(0, 320));
-                wsRef.current.send(
-                  JSON.stringify({
-                    event: "media",
-                    media: { payload: uint8ToBase64(chunk) },
-                  })
-                );
-              }
-              accumulator = accumulator.slice(320);
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          const updateVolume = () => {
+            if (!isCallActiveRef.current) return;
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
             }
-          }
-
-          const rms = Math.sqrt(sumSq / (input.length / ratio || 1));
-          setMicVolume(Math.min(1, rms * 5));
-        };
-
-        micSource.connect(scriptNode);
-        scriptNode.connect(audioCtx.destination);
+            const avg = sum / dataArray.length;
+            setMicVolume(Math.min(1, avg / 80));
+            animationFrameRef.current = requestAnimationFrame(updateVolume);
+          };
+          updateVolume();
+        }
+      } catch (analyserErr) {
+        console.warn("[Visualizer] Analyser setup skipped:", analyserErr);
       }
-    } catch (err) {
+
+      setState("listening");
+    } catch (err: unknown) {
       console.error("[StartVoiceCall Error]", err);
-      setErrorMessage(err instanceof Error ? err.message : "Could not access microphone");
+      setErrorMessage(err instanceof Error ? err.message : "Could not connect to live voice agent");
       setState("error");
     }
   };
@@ -402,11 +228,14 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-200">
+      {/* Hidden audio element for remote WebRTC stream */}
+      <audio ref={audioElementRef} autoPlay playsInline className="hidden" />
+
       <div
         className="relative w-full sm:max-w-[520px] bg-white sm:rounded-3xl border-t sm:border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
         style={{ height: "min(700px, 96dvh)" }}
       >
-        {/* ─── Header (Identical Layout & Aesthetic) ─── */}
+        {/* ─── Header ─── */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0 bg-white">
           <div className="flex items-center gap-2.5">
             <div
@@ -542,7 +371,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 <p className="text-xs text-slate-500 mt-1">
                   {state === "requesting_mic"
                     ? "Please allow microphone permission to talk."
-                    : "Establishing ultra-low latency audio stream..."}
+                    : "Establishing ultra-low latency WebRTC stream..."}
                 </p>
               </div>
             </div>
@@ -588,14 +417,14 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
                 </div>
               )}
 
-              {/* Manual Barge-In / Interrupt Button */}
+              {/* Manual Interrupt Button */}
               <button
                 type="button"
                 onClick={stopAgentAudio}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
               >
                 <VolumeX className="w-3.5 h-3.5" />
-                <span>Tap to interrupt Harika</span>
+                <span>Tap to pause Harika</span>
               </button>
             </div>
           )}
@@ -713,7 +542,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
           </div>
         </div>
 
-        {/* ─── Footer (Exact Reference Layout) ─── */}
+        {/* ─── Footer ─── */}
         <div className="px-5 py-2.5 border-t border-slate-100 flex items-center justify-between shrink-0 bg-white">
           <Link
             href="/login"
@@ -723,7 +552,7 @@ export function LiveAgentAudioModal({ isOpen, onClose }: Props) {
             Open Console <ArrowRight className="w-3 h-3" />
           </Link>
           <span className="text-[10px] text-slate-400 flex items-center gap-1">
-            <Radio className="w-2.5 h-2.5 text-emerald-500" /> Full-Duplex Real-Time Audio
+            <Radio className="w-2.5 h-2.5 text-emerald-500" /> LiveKit WebRTC Full-Duplex Audio
           </span>
         </div>
       </div>

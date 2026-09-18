@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  # 1. QETA Web SaaS Control Plane
+  qeta-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: qeta_web_control_plane
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 2. QETA LiveKit Voice Agent Worker (Continuously Running 24/7)
+  qeta-agent-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: qeta_livekit_agent_worker
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "8081:8081"
+    depends_on:
+      - qeta-web

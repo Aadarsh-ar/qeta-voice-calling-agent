@@ -21,6 +21,9 @@ enum IntegrationProvider {
   OPENAI
   CARTESIA
   POSTGRESQL
+  DEEPGRAM
+  GROQ
+  LIVEKIT
 }
 
 enum IntegrationStatus {
@@ -84,6 +87,7 @@ model Organization {
   pricingRules    ProviderPricing[]
   customers       Customer[]
   orders          Order[]
+  deployments     AgentDeployment[]
 
   @@index([slug])
 }
@@ -170,6 +174,7 @@ model Agent {
   tools            AgentTool[]
   knowledge        AgentKnowledge[]
   calls            Call[]
+  deployments      AgentDeployment[]
 
   @@index([organizationId])
   @@index([cartesiaAgentId])
@@ -251,6 +256,9 @@ model Call {
   agentId         String?
   vobizCallId     String?            @unique
   streamId        String?
+  livekitRoom     String?
+  livekitParticipantId String?
+  livekitSipCallId String?
   callerNumber    String
   agentNumber     String
   direction       CallDirection      @default(INBOUND)
@@ -401,4 +409,28 @@ model Order {
   @@index([phoneNumber])
   @@index([status])
   @@index([createdAt])
+}
+
+model AgentDeployment {
+  id              String        @id @default(cuid())
+  organizationId  String
+  agentId         String
+  versionNumber   Int           @default(1)
+  systemPrompt    String        @db.Text
+  instructions    String?       @db.Text
+  greeting        String?       @db.Text
+  voiceId         String
+  language        AgentLanguage @default(TELUGU_ENGLISH)
+  model           String        @default("llama-3.3-70b-versatile")
+  status          String        @default("LIVE") // DRAFT, LIVE, ARCHIVED
+  configSnapshot  Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent           Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([agentId])
+  @@index([agentId, status])
 }

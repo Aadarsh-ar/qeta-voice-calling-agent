@@ -1,0 +1,27 @@
+# 24/7 Production Dockerfile for QETA LiveKit Voice Agent Worker
+FROM node:20-slim AS runner
+
+WORKDIR /app
+
+# Install build essentials and ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# Install production dependencies
+RUN npm ci --omit=dev && npx prisma generate
+
+# Copy application source code
+COPY . .
+
+ENV NODE_ENV=production
+
+# The LiveKit Agent worker connects outward to LiveKit Cloud (wss://)
+# Health check port: 8081
+EXPOSE 8081
+
+CMD ["npx", "tsx", "src/agent/worker.ts", "start"]

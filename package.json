@@ -5,22 +5,32 @@
   "type": "module",
   "scripts": {
     "dev": "node server.js",
+    "agent:dev": "tsx src/agent/worker.ts dev",
+    "agent:start": "tsx src/agent/worker.ts start",
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint"
   },
   "dependencies": {
+    "@livekit/agents": "^1.9.0",
+    "@livekit/agents-plugin-cartesia": "^1.9.0",
+    "@livekit/agents-plugin-deepgram": "^1.9.0",
+    "@livekit/agents-plugin-openai": "^1.9.0",
+    "@livekit/agents-plugin-silero": "^1.9.0",
     "@prisma/client": "6.4.1",
-    "prisma": "6.4.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "formdata-node": "^6.0.3",
+    "livekit-client": "^2.22.3",
+    "livekit-server-sdk": "^2.19.0",
     "lucide-react": "^1.46.0",
     "next": "16.3.5",
+    "prisma": "6.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwind-merge": "^3.7.0",
+    "tsx": "^4.23.13",
     "ws": "^8.21.3"
   },
   "devDependencies": {
