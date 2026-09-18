@@ -101,6 +101,9 @@ export class CartesiaClient {
       throw new Error("Cartesia API key is not configured.");
     }
 
+    const MASTER_KEY = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    const primaryKey = this.getApiKey();
+
     const payload = {
       model_id: params.modelId || "sonic-3.6",
       transcript: params.transcript,
@@ -116,37 +119,47 @@ export class CartesiaClient {
     };
 
     const t0 = Date.now();
-    let res = await fetch(`${this.baseUrl}/tts/bytes`, {
-      method: "POST",
-      headers: {
-        "X-API-Key": this.getApiKey(),
-        "Cartesia-Version": this.version,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    // Auto-retry with master key if environment key rejected
-    if (res.status === 401 && this.getApiKey() !== "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
-      console.warn("[CARTESIA] Retrying with master fallback API key...");
+    let res: Response;
+    try {
       res = await fetch(`${this.baseUrl}/tts/bytes`, {
         method: "POST",
         headers: {
-          "X-API-Key": "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
+          "X-API-Key": primaryKey,
           "Cartesia-Version": this.version,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
       });
+    } catch (netErr: any) {
+      console.warn("[CARTESIA] Primary key network error:", netErr.message);
+      res = new Response(netErr.message || "Network Error", { status: 599 });
+    }
+
+    // Auto-retry with master key if environment key or primary key failed for ANY reason (status != 200)
+    if (!res.ok && primaryKey !== MASTER_KEY) {
+      console.warn(`[CARTESIA] Primary key synthesis failed (HTTP ${res.status}). Retrying with master fallback key...`);
+      try {
+        res = await fetch(`${this.baseUrl}/tts/bytes`, {
+          method: "POST",
+          headers: {
+            "X-API-Key": MASTER_KEY,
+            "Cartesia-Version": this.version,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (retryErr: any) {
+        console.warn("[CARTESIA] Master key fallback network error:", retryErr.message);
+      }
     }
 
     const latencyMs = Date.now() - t0;
     const contentType = res.headers.get("content-type") || "unknown";
 
     if (!res.ok) {
-      const errText = await res.text();
+      const errText = await res.text().catch(() => "");
       console.error(`[CARTESIA_TTS_DIAGNOSTIC] FAILED HTTP ${res.status} | Content-Type: ${contentType} | Latency: ${latencyMs}ms | Voice: ${params.voiceId} | Error: ${errText}`);
-      throw new Error(`Cartesia synthesis failed (${res.status}): ${errText}`);
+      throw new Error(`Cartesia synthesis failed (${res.status}): ${errText || res.statusText}`);
     }
 
     const arrayBuffer = await res.arrayBuffer();

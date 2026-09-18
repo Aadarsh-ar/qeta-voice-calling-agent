@@ -225,6 +225,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
       const textToSynthesize = (body.textToSpeak || userMessage || "").trim();
       let audioBase64: string | null = null;
       let audioBytes = 0;
+      let ttsError: string | null = null;
       if (cartesiaClient.isConfigured() && textToSynthesize) {
         try {
           console.log(`[TEST_ROUTE_TTS_ONLY] Synthesizing for "${agent?.name || cleanId}" | Voice: ${effectiveVoiceId} (${effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1" ? "Harika" : "AD"})`);
@@ -241,7 +242,8 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
             audioBytes = audioBuffer.byteLength;
           }
         } catch (e: any) {
-          console.warn("[TEST_ROUTE] ttsOnly Cartesia error:", e.message);
+          ttsError = e?.message || String(e);
+          console.warn("[TEST_ROUTE] ttsOnly Cartesia error:", ttsError);
         }
       }
       return NextResponse.json({
@@ -252,6 +254,8 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
         audioBytes,
         agentId: agent?.id,
         agentName: agent?.name,
+        cartesiaVoiceId: effectiveVoiceId,
+        ttsError,
       });
     }
 
@@ -309,6 +313,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
     let ttsLatencyMs = 120;
     let audioBase64: string | null = null;
     let audioBytes = 0;
+    let ttsError: string | null = null;
 
     if (cartesiaClient.isConfigured()) {
       const ttsStart = Date.now();
@@ -336,8 +341,8 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           console.warn(`[TEST_ROUTE_TTS] Cartesia returned 0 audio bytes, continuing in text fallback mode`);
         }
       } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.warn(`[TEST_ROUTE_TTS] Synthesis warning (continuing turn):`, errMsg);
+        ttsError = err instanceof Error ? err.message : String(err);
+        console.warn(`[TEST_ROUTE_TTS] Synthesis warning (continuing turn):`, ttsError);
       }
     }
 
@@ -354,6 +359,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
       cartesiaVoiceId: effectiveVoiceId,
       audioBase64,
       audioBytes,
+      ttsError,
       audioFormat: "audio/x-l16",
       sampleRate: 16000,
       latencies: {
