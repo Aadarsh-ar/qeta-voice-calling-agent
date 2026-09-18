@@ -137,44 +137,15 @@ export function LiveAgentAudioModal({
   const isHandsFreeRef = useRef(true);
   isHandsFreeRef.current = isHandsFree;
 
-  // Universal cross-browser audio playback with Blob URLs and Web Speech API fallback
+  // Universal cross-browser audio playback with Blob URLs for Sam's Cartesia Neural Voice
   const playPcmAudio = useCallback(
-    (base64?: string | null, sampleRate = 16000, onEnded?: () => void, fallbackText?: string) => {
+    (base64?: string | null, sampleRate = 16000, onEnded?: () => void) => {
       if (isMuted) {
         if (onEnded) onEnded();
         return;
       }
 
-      // If no Cartesia audio returned, fallback to native browser Web Speech API so voice is never absent
       if (!base64 || base64.trim().length === 0) {
-        if (fallbackText && typeof window !== "undefined" && "speechSynthesis" in window) {
-          try {
-            window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance(fallbackText);
-            utter.lang = "te-IN";
-            utter.rate = 1.05;
-            utter.pitch = 1.0;
-            utter.onstart = () => {
-              setIsSpeaking(true);
-              setIsAutoplayBlocked(false);
-            };
-            utter.onend = () => {
-              setIsSpeaking(false);
-              if (onEnded) onEnded();
-              if (isHandsFreeRef.current) {
-                setTimeout(() => {
-                  if (startListeningRef.current) startListeningRef.current();
-                }, 300);
-              }
-            };
-            utter.onerror = () => {
-              setIsSpeaking(false);
-              if (onEnded) onEnded();
-            };
-            window.speechSynthesis.speak(utter);
-            return;
-          } catch {}
-        }
         if (onEnded) onEnded();
         return;
       }
@@ -188,14 +159,6 @@ export function LiveAgentAudioModal({
           activeBlobUrlRef.current = null;
         }
 
-        // Stop any currently playing audio
-        if (audioElementRef.current) {
-          try {
-            audioElementRef.current.pause();
-            audioElementRef.current.currentTime = 0;
-          } catch {}
-        }
-
         const blob = base64ToWavBlob(base64, sampleRate);
         const blobUrl = URL.createObjectURL(blob);
         activeBlobUrlRef.current = blobUrl;
@@ -206,7 +169,12 @@ export function LiveAgentAudioModal({
           audio = new Audio();
         }
         audioElementRef.current = audio;
+
+        // Reset state and load Sam's voice
+        audio.pause();
+        audio.currentTime = 0;
         audio.src = blobUrl;
+        audio.volume = 1.0;
 
         audio.onplay = () => {
           setIsSpeaking(true);
@@ -232,27 +200,13 @@ export function LiveAgentAudioModal({
         };
 
         audio.onerror = (e) => {
-          console.warn("[LiveAgent] Audio playback notice:", e);
+          console.warn("[LiveAgent] Sam Cartesia audio notice:", e);
           setIsSpeaking(false);
           if (activeBlobUrlRef.current) {
             try {
               URL.revokeObjectURL(activeBlobUrlRef.current);
             } catch {}
             activeBlobUrlRef.current = null;
-          }
-          // Fallback to Web Speech API
-          if (fallbackText && typeof window !== "undefined" && "speechSynthesis" in window) {
-            try {
-              const utter = new SpeechSynthesisUtterance(fallbackText);
-              utter.lang = "te-IN";
-              utter.onstart = () => setIsSpeaking(true);
-              utter.onend = () => {
-                setIsSpeaking(false);
-                if (onEnded) onEnded();
-              };
-              window.speechSynthesis.speak(utter);
-              return;
-            } catch {}
           }
           if (onEnded) onEnded();
         };
@@ -353,10 +307,8 @@ export function LiveAgentAudioModal({
       .then((data) => {
         if (isCancelled) return;
         setIsGreetingLoading(false);
-        if (data.success) {
-          if (data.audioBase64) {
-            greetingAudioRef.current = data.audioBase64;
-          }
+        if (data.success && data.audioBase64) {
+          greetingAudioRef.current = data.audioBase64;
           setTurns((prev) =>
             prev.map((t) =>
               t.id === "greeting"
@@ -369,13 +321,12 @@ export function LiveAgentAudioModal({
                 : t
             )
           );
-          // Play initial greeting aloud (Cartesia WAV or Web Speech fallback)
-          playPcmAudio(data.audioBase64, data.sampleRate || 16000, undefined, greetingText);
+          // Play initial greeting aloud with Sam's Cartesia voice
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
         } else {
           setTurns((prev) =>
             prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
           );
-          playPcmAudio(null, 16000, undefined, greetingText);
         }
       })
       .catch((err) => {
@@ -385,7 +336,6 @@ export function LiveAgentAudioModal({
           setTurns((prev) =>
             prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
           );
-          playPcmAudio(null, 16000, undefined, greetingText);
         }
       });
 
@@ -448,8 +398,9 @@ export function LiveAgentAudioModal({
         };
         setTurns((prev) => [...prev, aiTurn]);
 
-        // Play aloud reliably (Cartesia audio or Web Speech API fallback)
-        playPcmAudio(data.audioBase64, data.sampleRate || 16000, undefined, data.rawReply);
+        if (data.audioBase64) {
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+        }
       } else {
         const errText = data.error || "క్షమించండి, సర్వర్ నుండి ప్రతిస్పందన రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.";
         setTurns((prev) => [
@@ -461,7 +412,6 @@ export function LiveAgentAudioModal({
             timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
           },
         ]);
-        playPcmAudio(null, 16000, undefined, errText);
       }
     } catch {
       const connErrText = "కనెక్షన్ సమస్య వచ్చింది. దయచేసి మళ్ళీ మాట్లాడండి.";
@@ -474,7 +424,6 @@ export function LiveAgentAudioModal({
           timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
         },
       ]);
-      playPcmAudio(null, 16000, undefined, connErrText);
     } finally {
       setIsThinking(false);
     }
@@ -754,9 +703,9 @@ export function LiveAgentAudioModal({
               type="button"
               onClick={() => {
                 unlockAudio();
-                const latestAiTurn = [...turns].reverse().find((t) => t.role === "ai");
-                if (latestAiTurn) {
-                  playPcmAudio(latestAiTurn.audioBase64, 16000, undefined, latestAiTurn.text);
+                const latestAiTurn = [...turns].reverse().find((t) => t.role === "ai" && t.audioBase64);
+                if (latestAiTurn?.audioBase64) {
+                  playPcmAudio(latestAiTurn.audioBase64, 16000);
                 }
                 setIsAutoplayBlocked(false);
               }}
@@ -824,17 +773,19 @@ export function LiveAgentAudioModal({
                     <span>{turn.timestamp}</span>
                     {isAi && (
                       <div className="flex items-center gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            unlockAudio();
-                            playPcmAudio(turn.audioBase64, 16000, undefined, turn.text);
-                          }}
-                          className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 transition cursor-pointer"
-                        >
-                          <Play className="w-2.5 h-2.5 fill-current" />
-                          <span>{isSpeaking ? "Playing..." : "Replay"}</span>
-                        </button>
+                        {turn.audioBase64 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              unlockAudio();
+                              playPcmAudio(turn.audioBase64!, 16000);
+                            }}
+                            className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 transition cursor-pointer"
+                          >
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>{isSpeaking ? "Playing..." : "Replay"}</span>
+                          </button>
+                        )}
 
                         {turn.latencyMs && (
                           <span className="font-mono text-emerald-700 font-semibold inline-flex items-center gap-0.5">

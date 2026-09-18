@@ -10,6 +10,7 @@
  */
 
 let sharedAudio: HTMLAudioElement | null = null;
+let hasPrimed = false;
 
 export function getSharedAudioElement(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
@@ -21,8 +22,9 @@ export function getSharedAudioElement(): HTMLAudioElement | null {
 }
 
 export function unlockAudio() {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || hasPrimed) return;
   try {
+    hasPrimed = true;
     // 1. Prime the shared HTMLAudioElement directly in the user click callstack
     const audio = getSharedAudioElement();
     if (audio) {
