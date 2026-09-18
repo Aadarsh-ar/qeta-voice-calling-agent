@@ -18,7 +18,7 @@ import {
   User,
 } from "lucide-react";
 
-import { unlockAudio } from "@/lib/audio/unlock";
+import { unlockAudio, getSharedAudioElement } from "@/lib/audio/unlock";
 
 export interface LiveTurn {
   id: string;
@@ -201,11 +201,11 @@ export function LiveAgentAudioModal({
         activeBlobUrlRef.current = blobUrl;
 
         // Re-use existing audio element to keep user gesture authorization alive
-        let audio = audioElementRef.current;
+        let audio = audioElementRef.current || getSharedAudioElement();
         if (!audio) {
           audio = new Audio();
-          audioElementRef.current = audio;
         }
+        audioElementRef.current = audio;
         audio.src = blobUrl;
 
         audio.onplay = () => {
@@ -318,6 +318,10 @@ export function LiveAgentAudioModal({
     if (!isOpen) {
       greetingAudioRef.current = null;
       return;
+    }
+
+    if (!audioElementRef.current) {
+      audioElementRef.current = getSharedAudioElement();
     }
 
     const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
