@@ -18,6 +18,8 @@ import {
   User,
 } from "lucide-react";
 
+import { unlockAudio } from "@/lib/audio/unlock";
+
 export interface LiveTurn {
   id: string;
   role: "ai" | "caller";
@@ -50,6 +52,51 @@ const QUICK_STARTERS = [
   "Pricing details చెప్పండి",
 ];
 
+function base64ToWavBlob(base64: string, sampleRate = 16000): Blob {
+  try {
+    const binary = window.atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    // Check for standard RIFF header (from Cartesia container: 'wav')
+    if (len >= 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+      return new Blob([bytes], { type: "audio/wav" });
+    }
+
+    // Prepend standard 44-byte WAV header to raw PCM
+    const wavHeader = new ArrayBuffer(44);
+    const view = new DataView(wavHeader);
+    const totalDataLen = len;
+    const totalLen = totalDataLen + 36;
+
+    // "RIFF"
+    view.setUint32(0, 0x52494646, false);
+    view.setUint32(4, totalLen, true);
+    // "WAVE"
+    view.setUint32(8, 0x57415645, false);
+    // "fmt "
+    view.setUint32(12, 0x666d7420, false);
+    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+    view.setUint16(22, 1, true); // NumChannels (1 for Mono)
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); // ByteRate (sampleRate * numChannels * bitsPerSample/8)
+    view.setUint16(32, 2, true); // BlockAlign (numChannels * bitsPerSample/8)
+    view.setUint16(34, 16, true); // BitsPerSample
+    // "data"
+    view.setUint32(36, 0x64617461, false);
+    view.setUint32(40, totalDataLen, true);
+
+    return new Blob([wavHeader, bytes], { type: "audio/wav" });
+  } catch (err) {
+    console.warn("[LiveAgent] base64ToWavBlob notice:", err);
+    return new Blob([], { type: "audio/wav" });
+  }
+}
+
 export function LiveAgentAudioModal({
   isOpen,
   onClose,
@@ -78,9 +125,9 @@ export function LiveAgentAudioModal({
     },
   ]);
 
-  // Audio refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  // Audio elements and refs
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const activeBlobUrlRef = useRef<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,77 +137,90 @@ export function LiveAgentAudioModal({
   const isHandsFreeRef = useRef(true);
   isHandsFreeRef.current = isHandsFree;
 
-  // Initialize or resume AudioContext safely on user interaction
-  const ensureAudioContext = useCallback(() => {
-    try {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-        audioContextRef.current = new AudioCtx({ sampleRate: 16000 });
-      }
-      if (audioContextRef.current.state === "suspended") {
-        audioContextRef.current.resume().catch(() => {});
-      }
-      return audioContextRef.current;
-    } catch (err) {
-      console.warn("[LiveAgent] AudioContext error:", err);
-      return null;
-    }
-  }, []);
-
-  // Safely decode and play 16-bit PCM audio from Cartesia
+  // Universal cross-browser audio playback with Blob URLs and Web Speech API fallback
   const playPcmAudio = useCallback(
-    (base64: string, sampleRate = 16000, onEnded?: () => void) => {
+    (base64?: string | null, sampleRate = 16000, onEnded?: () => void, fallbackText?: string) => {
       if (isMuted) {
         if (onEnded) onEnded();
         return;
       }
-      try {
-        const binary = window.atob(base64);
-        const len = binary.length;
-        if (len === 0) {
-          if (onEnded) onEnded();
-          return;
-        }
 
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-
-        // Safe PCM decoding using DataView (never throws RangeError on odd byte lengths)
-        const numSamples = Math.floor(len / 2);
-        const float32 = new Float32Array(numSamples);
-        const dataView = new DataView(bytes.buffer, bytes.byteOffset, numSamples * 2);
-        for (let i = 0; i < numSamples; i++) {
-          float32[i] = dataView.getInt16(i * 2, true) / 32768.0;
-        }
-
-        const ctx = ensureAudioContext();
-        if (!ctx) {
-          if (onEnded) onEnded();
-          return;
-        }
-
-        // Stop any current source immediately
-        if (activeSourceRef.current) {
+      // If no Cartesia audio returned, fallback to native browser Web Speech API so voice is never absent
+      if (!base64 || base64.trim().length === 0) {
+        if (fallbackText && typeof window !== "undefined" && "speechSynthesis" in window) {
           try {
-            activeSourceRef.current.stop();
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(fallbackText);
+            utter.lang = "te-IN";
+            utter.rate = 1.05;
+            utter.pitch = 1.0;
+            utter.onstart = () => {
+              setIsSpeaking(true);
+              setIsAutoplayBlocked(false);
+            };
+            utter.onend = () => {
+              setIsSpeaking(false);
+              if (onEnded) onEnded();
+              if (isHandsFreeRef.current) {
+                setTimeout(() => {
+                  if (startListeningRef.current) startListeningRef.current();
+                }, 300);
+              }
+            };
+            utter.onerror = () => {
+              setIsSpeaking(false);
+              if (onEnded) onEnded();
+            };
+            window.speechSynthesis.speak(utter);
+            return;
           } catch {}
-          activeSourceRef.current = null;
+        }
+        if (onEnded) onEnded();
+        return;
+      }
+
+      try {
+        // Clean up previous blob URL
+        if (activeBlobUrlRef.current) {
+          try {
+            URL.revokeObjectURL(activeBlobUrlRef.current);
+          } catch {}
+          activeBlobUrlRef.current = null;
         }
 
-        const buffer = ctx.createBuffer(1, float32.length, sampleRate);
-        buffer.getChannelData(0).set(float32);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
+        // Stop any currently playing audio
+        if (audioElementRef.current) {
+          try {
+            audioElementRef.current.pause();
+            audioElementRef.current.currentTime = 0;
+          } catch {}
+        }
 
-        setIsSpeaking(true);
-        source.onended = () => {
-          activeSourceRef.current = null;
+        const blob = base64ToWavBlob(base64, sampleRate);
+        const blobUrl = URL.createObjectURL(blob);
+        activeBlobUrlRef.current = blobUrl;
+
+        // Re-use existing audio element to keep user gesture authorization alive
+        let audio = audioElementRef.current;
+        if (!audio) {
+          audio = new Audio();
+          audioElementRef.current = audio;
+        }
+        audio.src = blobUrl;
+
+        audio.onplay = () => {
+          setIsSpeaking(true);
+          setIsAutoplayBlocked(false);
+        };
+
+        audio.onended = () => {
           setIsSpeaking(false);
+          if (activeBlobUrlRef.current) {
+            try {
+              URL.revokeObjectURL(activeBlobUrlRef.current);
+            } catch {}
+            activeBlobUrlRef.current = null;
+          }
           if (onEnded) onEnded();
           if (isHandsFreeRef.current) {
             setTimeout(() => {
@@ -171,37 +231,62 @@ export function LiveAgentAudioModal({
           }
         };
 
-        activeSourceRef.current = source;
-        source.start();
+        audio.onerror = (e) => {
+          console.warn("[LiveAgent] Audio playback notice:", e);
+          setIsSpeaking(false);
+          if (activeBlobUrlRef.current) {
+            try {
+              URL.revokeObjectURL(activeBlobUrlRef.current);
+            } catch {}
+            activeBlobUrlRef.current = null;
+          }
+          // Fallback to Web Speech API
+          if (fallbackText && typeof window !== "undefined" && "speechSynthesis" in window) {
+            try {
+              const utter = new SpeechSynthesisUtterance(fallbackText);
+              utter.lang = "te-IN";
+              utter.onstart = () => setIsSpeaking(true);
+              utter.onend = () => {
+                setIsSpeaking(false);
+                if (onEnded) onEnded();
+              };
+              window.speechSynthesis.speak(utter);
+              return;
+            } catch {}
+          }
+          if (onEnded) onEnded();
+        };
 
-        if (ctx.state === "suspended") {
-          ctx
-            .resume()
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise
             .then(() => {
+              setIsSpeaking(true);
               setIsAutoplayBlocked(false);
             })
-            .catch(() => {
+            .catch((err) => {
+              console.warn("[LiveAgent] Autoplay prevented by browser:", err);
+              setIsSpeaking(false);
               setIsAutoplayBlocked(true);
             });
-        } else {
-          setIsAutoplayBlocked(false);
         }
       } catch (err) {
-        console.warn("[LiveAgent] PCM playback note:", err);
+        console.warn("[LiveAgent] Audio playback error:", err);
         setIsSpeaking(false);
         if (onEnded) onEnded();
       }
     },
-    [isMuted, ensureAudioContext]
+    [isMuted]
   );
 
   // Stop active speech (barge-in / interrupt)
   const stopAudio = useCallback(() => {
-    if (activeSourceRef.current) {
+    if (audioElementRef.current) {
       try {
-        activeSourceRef.current.stop();
+        audioElementRef.current.pause();
+        audioElementRef.current.currentTime = 0;
       } catch {}
-      activeSourceRef.current = null;
+      audioElementRef.current = null;
     }
     setIsSpeaking(false);
   }, []);
@@ -264,8 +349,10 @@ export function LiveAgentAudioModal({
       .then((data) => {
         if (isCancelled) return;
         setIsGreetingLoading(false);
-        if (data.success && data.audioBase64) {
-          greetingAudioRef.current = data.audioBase64;
+        if (data.success) {
+          if (data.audioBase64) {
+            greetingAudioRef.current = data.audioBase64;
+          }
           setTurns((prev) =>
             prev.map((t) =>
               t.id === "greeting"
@@ -278,12 +365,13 @@ export function LiveAgentAudioModal({
                 : t
             )
           );
-          // Play initial greeting aloud
-          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
+          // Play initial greeting aloud (Cartesia WAV or Web Speech fallback)
+          playPcmAudio(data.audioBase64, data.sampleRate || 16000, undefined, greetingText);
         } else {
           setTurns((prev) =>
             prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
           );
+          playPcmAudio(null, 16000, undefined, greetingText);
         }
       })
       .catch((err) => {
@@ -293,6 +381,7 @@ export function LiveAgentAudioModal({
           setTurns((prev) =>
             prev.map((t) => (t.id === "greeting" ? { ...t, isLoadingAudio: false } : t))
           );
+          playPcmAudio(null, 16000, undefined, greetingText);
         }
       });
 
@@ -311,7 +400,6 @@ export function LiveAgentAudioModal({
       silenceTimerRef.current = null;
     }
 
-    ensureAudioContext();
     stopAudio();
     setInputText("");
     setIsThinking(true);
@@ -356,30 +444,33 @@ export function LiveAgentAudioModal({
         };
         setTurns((prev) => [...prev, aiTurn]);
 
-        if (data.audioBase64) {
-          playPcmAudio(data.audioBase64, data.sampleRate || 16000);
-        }
+        // Play aloud reliably (Cartesia audio or Web Speech API fallback)
+        playPcmAudio(data.audioBase64, data.sampleRate || 16000, undefined, data.rawReply);
       } else {
+        const errText = data.error || "క్షమించండి, సర్వర్ నుండి ప్రతిస్పందన రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.";
         setTurns((prev) => [
           ...prev,
           {
             id: `ai_err_${Date.now()}`,
             role: "ai",
-            text: data.error || "క్షమించండి, సర్వర్ నుండి ప్రతిస్పందన రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.",
+            text: errText,
             timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
           },
         ]);
+        playPcmAudio(null, 16000, undefined, errText);
       }
     } catch {
+      const connErrText = "కనెక్షన్ సమస్య వచ్చింది. దయచేసి మళ్ళీ మాట్లాడండి.";
       setTurns((prev) => [
         ...prev,
         {
           id: `ai_err_${Date.now()}`,
           role: "ai",
-          text: "కనెక్షన్ సమస్య వచ్చింది. దయచేసి మళ్ళీ మాట్లాడండి.",
+          text: connErrText,
           timestamp: new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
         },
       ]);
+      playPcmAudio(null, 16000, undefined, connErrText);
     } finally {
       setIsThinking(false);
     }
@@ -391,7 +482,6 @@ export function LiveAgentAudioModal({
   const startListeningRef = useRef<() => void>(() => {});
 
   const startListening = useCallback(() => {
-    ensureAudioContext();
     const SpeechRec =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) return;
@@ -465,13 +555,12 @@ export function LiveAgentAudioModal({
       console.warn("[LiveAgent] Speech recognition notice:", err);
       setIsListening(false);
     }
-  }, [ensureAudioContext, stopAudio]);
+  }, [stopAudio]);
 
   startListeningRef.current = startListening;
 
   // Toggle Microphone / Speech-to-Text
   const toggleListening = () => {
-    ensureAudioContext();
     if (isListening) {
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
@@ -498,7 +587,6 @@ export function LiveAgentAudioModal({
 
   // Reset conversation
   const handleReset = () => {
-    ensureAudioContext();
     stopAudio();
     const greetingText = (initialGreeting || DEFAULT_GREETING).trim();
     setTurns([
@@ -618,7 +706,6 @@ export function LiveAgentAudioModal({
             <button
               type="button"
               onClick={() => {
-                ensureAudioContext();
                 setIsMuted(!isMuted);
                 if (!isMuted) stopAudio();
               }}
@@ -662,9 +749,10 @@ export function LiveAgentAudioModal({
             <button
               type="button"
               onClick={() => {
-                ensureAudioContext();
-                if (turns[0]?.audioBase64) {
-                  playPcmAudio(turns[0].audioBase64);
+                unlockAudio();
+                const latestAiTurn = [...turns].reverse().find((t) => t.role === "ai");
+                if (latestAiTurn) {
+                  playPcmAudio(latestAiTurn.audioBase64, 16000, undefined, latestAiTurn.text);
                 }
                 setIsAutoplayBlocked(false);
               }}
@@ -732,24 +820,17 @@ export function LiveAgentAudioModal({
                     <span>{turn.timestamp}</span>
                     {isAi && (
                       <div className="flex items-center gap-2.5">
-                        {turn.audioBase64 ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              ensureAudioContext();
-                              playPcmAudio(turn.audioBase64!);
-                            }}
-                            className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 transition cursor-pointer"
-                          >
-                            <Play className="w-2.5 h-2.5 fill-current" />
-                            <span>{isSpeaking ? "Playing..." : "Replay"}</span>
-                          </button>
-                        ) : turn.isLoadingAudio ? (
-                          <span className="inline-flex items-center gap-1 text-slate-400">
-                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                            <span>Generating voice...</span>
-                          </span>
-                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            unlockAudio();
+                            playPcmAudio(turn.audioBase64, 16000, undefined, turn.text);
+                          }}
+                          className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 transition cursor-pointer"
+                        >
+                          <Play className="w-2.5 h-2.5 fill-current" />
+                          <span>{isSpeaking ? "Playing..." : "Replay"}</span>
+                        </button>
 
                         {turn.latencyMs && (
                           <span className="font-mono text-emerald-700 font-semibold inline-flex items-center gap-0.5">
@@ -798,7 +879,6 @@ export function LiveAgentAudioModal({
               key={i}
               type="button"
               onClick={() => {
-                ensureAudioContext();
                 handleSend(prompt);
               }}
               disabled={isThinking}
@@ -814,7 +894,6 @@ export function LiveAgentAudioModal({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              ensureAudioContext();
               handleSend(inputText);
             }}
             className="flex items-center gap-2"

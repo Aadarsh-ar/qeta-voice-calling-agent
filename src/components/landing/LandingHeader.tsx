@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ArrowRight, Menu, X, PhoneCall, Bot, Sparkles } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { unlockAudio } from "@/lib/audio/unlock";
 
 interface LandingHeaderProps {
   onOpenTestAgent?: () => void;
@@ -12,6 +13,11 @@ interface LandingHeaderProps {
 export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
+
+  const handleTestAgentClick = () => {
+    unlockAudio();
+    if (onOpenTestAgent) onOpenTestAgent();
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full bg-[#FAFAF8]/90 backdrop-blur-md border-b border-[#EAEBE8] transition-all">
@@ -95,7 +101,7 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
           {onOpenTestAgent && (
             <button
               type="button"
-              onClick={onOpenTestAgent}
+              onClick={handleTestAgentClick}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100/80 transition cursor-pointer"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
@@ -174,7 +180,7 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
                 type="button"
                 onClick={() => {
                   setMobileMenuOpen(false);
-                  onOpenTestAgent();
+                  handleTestAgentClick();
                 }}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 font-semibold text-sm border border-emerald-200 cursor-pointer"
               >

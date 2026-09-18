@@ -24,14 +24,20 @@ import { HeroVisual } from "@/components/landing/HeroVisual";
 import { HeroValueStrip } from "@/components/landing/HeroValueStrip";
 import { LiveAgentAudioModal } from "@/components/landing/LiveAgentAudioModal";
 import { Logo } from "@/components/brand/Logo";
+import { unlockAudio } from "@/lib/audio/unlock";
 
 export default function HomePage() {
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
 
+  const handleOpenAudioModal = () => {
+    unlockAudio();
+    setIsAudioModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-[#FAFAF8] text-slate-900 flex flex-col selection:bg-emerald-100 selection:text-emerald-900">
       {/* ─── 1. Header (Matching Reference Navigation) ─── */}
-      <LandingHeader onOpenTestAgent={() => setIsAudioModalOpen(true)} />
+      <LandingHeader onOpenTestAgent={handleOpenAudioModal} />
 
       {/* ─── 2. Hero Section (Pixel-Aligned to Reference Image) ─── */}
       <section className="relative pt-8 pb-16 lg:pt-14 lg:pb-24 overflow-hidden">
@@ -71,7 +77,7 @@ export default function HomePage() {
                 {/* Secondary CTA (Interactive Voice Chat Test Agent) */}
                 <button
                   type="button"
-                  onClick={() => setIsAudioModalOpen(true)}
+                  onClick={handleOpenAudioModal}
                   className="btn-emerald-secondary text-sm sm:text-base px-6 py-3.5 group relative cursor-pointer"
                 >
                   <span className="w-6 h-6 rounded-full bg-emerald-100/90 text-emerald-800 flex items-center justify-center shrink-0 -ml-1 transition-transform group-hover:scale-105">

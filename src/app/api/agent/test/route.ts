@@ -232,6 +232,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
             transcript: textToSynthesize,
             voiceId: effectiveVoiceId,
             modelId: "sonic-3.6",
+            container: "wav",
             encoding: "pcm_s16le",
             sampleRate: 16000,
           });
@@ -321,6 +322,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           transcript: textToSynthesize,
           voiceId,
           modelId: "sonic-3.6",
+          container: "wav",
           encoding: "pcm_s16le",
           sampleRate: 16000,
         });

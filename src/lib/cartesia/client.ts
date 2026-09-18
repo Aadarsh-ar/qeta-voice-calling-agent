@@ -94,6 +94,7 @@ export class CartesiaClient {
     modelId?: string;
     sampleRate?: number;
     encoding?: "pcm_s16le" | "pcm_f32le" | "pcm_mulaw";
+    container?: "wav" | "raw";
   }): Promise<ArrayBuffer> {
     if (!this.isConfigured()) {
       throw new Error("Cartesia API key is not configured.");
@@ -107,7 +108,7 @@ export class CartesiaClient {
         id: params.voiceId,
       },
       output_format: {
-        container: "raw",
+        container: params.container || "wav",
         encoding: params.encoding || "pcm_s16le",
         sample_rate: params.sampleRate || 16000,
       },
