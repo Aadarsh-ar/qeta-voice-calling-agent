@@ -74,8 +74,17 @@ export function getTelephonyConfig() {
   const vobizSipUsername = getEnvVar("VOBIZ_SIP_USERNAME", DEFAULT_TELEPHONY_CONFIG.vobizSipUsername);
   const vobizSipPassword = getEnvVar("VOBIZ_SIP_PASSWORD", DEFAULT_TELEPHONY_CONFIG.vobizSipPassword);
 
-  const cartesiaApiKey = getEnvVar("CARTESIA_API_KEY", DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey);
-  const cartesiaAgentId = getEnvVar("CARTESIA_AGENT_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId);
+  let cartesiaApiKey = getEnvVar("CARTESIA_API_KEY", DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey);
+  // Bypass stale/unconfigured Cartesia keys that have no phone numbers or return 404
+  if (cartesiaApiKey.startsWith("sk_car_kjQ") || cartesiaApiKey.length < 20) {
+    cartesiaApiKey = DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey;
+  }
+
+  let cartesiaAgentId = getEnvVar("CARTESIA_AGENT_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId);
+  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId.startsWith("agent_")) {
+    cartesiaAgentId = DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId;
+  }
+
   const cartesiaVoiceId = getEnvVar("CARTESIA_VOICE_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaVoiceId);
 
   const sarvamApiKey = getEnvVar("SARVAM_API_KEY", DEFAULT_TELEPHONY_CONFIG.sarvamApiKey);

@@ -119,10 +119,14 @@ export async function POST(req: Request) {
     }
 
     const cartesiaApiKey = telConfig.cartesiaApiKey;
-    const cartesiaAgentId =
+    let cartesiaAgentId =
       agent.cartesiaAgentId && agent.cartesiaAgentId.startsWith("agent_")
         ? agent.cartesiaAgentId
         : telConfig.cartesiaAgentId;
+
+    if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId) {
+      cartesiaAgentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
+    }
 
     const resolvedAgentId = agent.id;
     const agentName = agent.name;
