@@ -189,9 +189,10 @@ export async function endCall(params: EndCallParams): Promise<boolean> {
   try {
     const existingCall = dataStore.getCall(callId);
     if (existingCall) {
-      existingCall.status = isIntentional ? CallStatus.COMPLETED : CallStatus.FAILED;
-      existingCall.stage = "ENDED";
-      dataStore.updateCall(existingCall);
+      dataStore.updateCall(callId, {
+        status: isIntentional ? CallStatus.COMPLETED : CallStatus.FAILED,
+        stage: "ENDED",
+      });
     }
   } catch (err) {
     console.warn(`[END_CALL] Could not update store for ${callId}:`, err);

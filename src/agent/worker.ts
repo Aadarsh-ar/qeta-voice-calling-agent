@@ -17,7 +17,7 @@ const FALLBACKS: Record<string, string> = {
   LIVEKIT_API_SECRET: "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG",
   DEEPGRAM_API_KEY: "5cfc51075cbd0dd63e8cd8b46cc240eed660551d",
   CARTESIA_API_KEY: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
-  CARTESIA_VOICE_ID: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+  CARTESIA_VOICE_ID: "93d9c1de-e167-44c6-8e39-b4440c106a1d",
   // Groq key split so GitHub push-protection doesn't flag plain-text secrets
   GROQ_API_KEY: ["g", "s", "k_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join(""),
 };
@@ -237,7 +237,7 @@ Visitor conversation ముగించాలనుకుంటే:
           if (t.function.name === "end_call") {
             console.log(`[QETA Tool Call] end_call triggered for room ${ctx.room.name}, ensuring closing sentence finishes`);
             endCall({
-              callId: callId || ctx.room.name,
+              callId: callId || ctx.room.name || "room_default",
               reason: EndCallReason.CONVERSATION_COMPLETED,
               audioDurationMs: 3500, // 3.5s buffer for spoken closing sentence to finish
               disconnectFn: async () => {

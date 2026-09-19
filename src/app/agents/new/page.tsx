@@ -97,7 +97,7 @@ export default function CreateAgentPage() {
   const [language, setLanguage] = useState<AgentLanguage>(AgentLanguage.TELUGU_ENGLISH);
   const [systemPrompt, setSystemPrompt] = useState(PRESETS[0].prompt);
   const [cartesiaAgentId, setCartesiaAgentId] = useState("");
-  const [cartesiaVoiceId, setCartesiaVoiceId] = useState("f9945b75-0f3b-448d-ba9e-3d22c229a68e");
+  const [cartesiaVoiceId, setCartesiaVoiceId] = useState("93d9c1de-e167-44c6-8e39-b4440c106a1d");
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState("+91 80 7158 2667");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStep, setSaveStep] = useState<"idle" | "saving" | "syncing" | "ready" | "error">("idle");
@@ -143,7 +143,9 @@ export default function CreateAgentPage() {
       setSaveStep((cur) => (cur === "saving" ? "syncing" : cur));
     }, 250);
 
-    const voiceName = cartesiaVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
+    const voiceName = cartesiaVoiceId === "93d9c1de-e167-44c6-8e39-b4440c106a1d"
+      ? "Priya (Cloned Telugu Voice)"
+      : cartesiaVoiceId === "41508a7d-4839-445f-ba7f-687f620ed0e7" || cartesiaVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1"
       ? "Harika (Telugu Faculty Voice)"
       : "AD (Cloned Telugu Voice)";
 
@@ -365,11 +367,14 @@ export default function CreateAgentPage() {
                     onChange={(e) => setCartesiaVoiceId(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 text-xs focus:outline-none focus:border-indigo-500 font-medium"
                   >
+                    <option value="93d9c1de-e167-44c6-8e39-b4440c106a1d">
+                      Priya (Cloned Telugu Voice - Female, Natural)
+                    </option>
+                    <option value="41508a7d-4839-445f-ba7f-687f620ed0e7">
+                      Harika (Telugu Faculty Voice - Female)
+                    </option>
                     <option value="f9945b75-0f3b-448d-ba9e-3d22c229a68e">
                       AD (Cloned Telugu Voice - Male)
-                    </option>
-                    <option value="89907713-42ce-4ddd-8ff5-301211c564c1">
-                      Harika (Telugu Faculty Voice - Female)
                     </option>
                   </select>
                 </div>

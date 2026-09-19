@@ -34,6 +34,15 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
             Product
           </Link>
           <Link
+            href="/campaigns"
+            className="hover:text-emerald-800 transition-colors py-1 flex items-center gap-1.5"
+          >
+            <span>Campaigns</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300/60">
+              New
+            </span>
+          </Link>
+          <Link
             href="#solutions"
             className="hover:text-emerald-800 transition-colors py-1"
           >
@@ -143,6 +152,16 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
               className="py-1 hover:text-emerald-800 transition"
             >
               Product
+            </Link>
+            <Link
+              href="/campaigns"
+              onClick={() => setMobileMenuOpen(false)}
+              className="py-1 hover:text-emerald-800 transition flex items-center justify-between"
+            >
+              <span>Campaigns</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                New
+              </span>
             </Link>
             <Link
               href="#solutions"

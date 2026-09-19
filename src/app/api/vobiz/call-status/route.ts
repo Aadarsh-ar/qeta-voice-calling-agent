@@ -104,6 +104,19 @@ export async function POST(req: Request) {
       endedAt: eventTimestamp,
     });
 
+    // Notify campaignManager if this was a campaign call
+    try {
+      const { campaignManager } = await import("@/lib/campaigns/campaignManager");
+      campaignManager.handleCallStatusUpdate(providerCallId, {
+        status: CallStatus.COMPLETED,
+        hangup_cause: hangupCause,
+        reason: terminationReason,
+        duration,
+      });
+    } catch (campErr) {
+      console.warn("[VOBIZ_STATUS] Could not forward status to campaignManager:", campErr);
+    }
+
     // Update Neon PostgreSQL if available
     try {
       const { prisma } = await import("@/lib/db/prisma");
