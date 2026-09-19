@@ -124,7 +124,10 @@ export async function POST(req: Request) {
         ? agent.cartesiaAgentId
         : telConfig.cartesiaAgentId;
 
-    if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || cartesiaAgentId === "agent_DSSrQj5z4ofsawJ6ZeSvF7" || !cartesiaAgentId) {
+    // Guaranteed valid agents on the active, paid Cartesia account (ata_bfSkbLZ3BgAX8QsWp7vWqY)
+    const validCartesiaAgents = ["agent_vDCfnuFdJokXJDVxgmHeZx", "agent_WzcEn6kkRmPxAfBNHzvpa1"];
+    if (!cartesiaAgentId || !validCartesiaAgents.includes(cartesiaAgentId)) {
+      console.warn(`[OUTBOUND] Agent ID ${cartesiaAgentId} is not in paid Cartesia account, remapping to verified agent_vDCfnuFdJokXJDVxgmHeZx`);
       cartesiaAgentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
     }
 
@@ -228,12 +231,39 @@ export async function POST(req: Request) {
           telephonyDetails = JSON.stringify(cartesiaCallData);
           cartesiaDispatched = true;
         } else {
-          telephonyDetails = `Cartesia returned status ${cartesiaCallRes.status}: ${JSON.stringify(cartesiaCallData)}`;
-          console.warn("[CARTESIA OUTBOUND] Cartesia call attempt unconfirmed, trying fallback:", telephonyDetails);
+          // If first attempt failed (e.g. invalid agent or phone mapping), retry with guaranteed attendance agent
+          console.warn("[CARTESIA OUTBOUND] First attempt unconfirmed, retrying with master agent_vDCfnuFdJokXJDVxgmHeZx:", cartesiaCallData);
+          const retryRes = await fetch("https://api.cartesia.ai/agents/calls", {
+            method: "POST",
+            headers: {
+              "X-API-Key": cartesiaApiKey,
+              "Cartesia-Version": "2025-04-16",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from_number_id: "ap_qXvGsN8xnFH3giNBsQ8QBM",
+              agent_id: "agent_vDCfnuFdJokXJDVxgmHeZx",
+              ringing_timeout_seconds: 30,
+              outbound_calls: [{ to_number: cleanNumber }],
+            }),
+          });
+          const retryData = await retryRes.json();
+          const retryCall = retryData.calls?.[0];
+          if (retryRes.ok && retryCall?.agent_call_id) {
+            cartesiaCallId = retryCall.agent_call_id;
+            vobizCallId = cartesiaCallId;
+            telephonyStatus = "RINGING";
+            telephonyReason = "Call initiated via Cartesia Realtime Agent Runtime (Vobiz SIP Trunk)";
+            telephonyDetails = JSON.stringify(retryData);
+            cartesiaDispatched = true;
+          } else {
+            telephonyDetails = `Cartesia retry failed: ${JSON.stringify(retryData)}`;
+            console.error("[CARTESIA OUTBOUND] Cartesia call dispatch failed completely:", telephonyDetails);
+          }
         }
       } catch (cErr: any) {
         telephonyDetails = `Cartesia exception: ${cErr?.message || cErr}`;
-        console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception, trying fallback:", cErr);
+        console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception:", cErr);
       }
     }
 
@@ -286,7 +316,13 @@ export async function POST(req: Request) {
     }
 
     // ─── 3. Fallback Dispatch: Vobiz REST API ──────────────────────────────
-    if (!cartesiaDispatched && !livekitDispatched && vobizAuthId && vobizAuthToken) {
+    // CRITICAL SAFETY CHECK: On Vercel serverless (e.g. qeta.in), persistent WebSockets are NOT supported.
+    // Calling Vobiz REST API with an answer_url pointing to Vercel causes Vobiz to get a 404 WebSocket handshake,
+    // which triggers hangup_cause_code 4010 ("End Of XML Instructions") and hangs up 1 second after pickup!
+    const isVercelEnvironment = !!(process.env.VERCEL || webhookUrl.includes("qeta.in") || webhookUrl.includes("vercel.app"));
+    const hasDedicatedWsServer = !!(process.env.PUBLIC_WS_URL || process.env.VOBIZ_STREAM_URL);
+
+    if (!cartesiaDispatched && !livekitDispatched && vobizAuthId && vobizAuthToken && (!isVercelEnvironment || hasDedicatedWsServer)) {
       try {
         const vobizApiUrl = `https://api.vobiz.ai/api/v1/Account/${vobizAuthId}/Call/`;
         const answerUrl = `${webhookUrl}/api/vobiz/incoming-call?agentId=${encodeURIComponent(resolvedAgentId)}&callerNumber=${encodeURIComponent(cleanNumber)}`;

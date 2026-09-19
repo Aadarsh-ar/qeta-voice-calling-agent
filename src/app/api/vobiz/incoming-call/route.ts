@@ -39,14 +39,24 @@ export async function POST(req: Request) {
     // In XML, bare & inside a text node causes fatal "Invalid Answer XML"
     const safeWsUrl = wsUrl.replace(/&/g, "&amp;");
 
-    // Vobiz official bidirectional stream specification:
-    // audio/x-mulaw at 8000Hz (telephony standard).
-    // Note: audioTrack="inbound" must NOT be set when bidirectional="true" because
-    // it can suppress outbound playAudio playback on carrier network.
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+    // Vercel Serverless Check: Vercel does NOT support persistent WebSockets.
+    // If wsUrl points to Vercel/qeta.in without a dedicated WS server, returning <Stream>
+    // causes Vobiz to fail the WS handshake with 404 and hang up after 1s (4010 End Of XML Instructions).
+    const isVercel = hostHeader.includes("qeta.in") || hostHeader.includes("vercel.app") || !!process.env.VERCEL;
+    const hasExternalWs = !!(process.env.PUBLIC_WS_URL || process.env.VOBIZ_STREAM_URL);
+
+    let xml: string;
+    if (isVercel && !hasExternalWs) {
+      xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Speak voice="Polly.Aditi" language="te-IN">నమస్కారం అండి! AI వాయిస్ ఏజెంట్ లైన్ లో ఉంది.</Speak>
+</Response>`.trim();
+    } else {
+      xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">${safeWsUrl}</Stream>
 </Response>`.trim();
+    }
 
     return new NextResponse(xml, {
       status: 200,
