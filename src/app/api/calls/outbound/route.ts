@@ -124,7 +124,7 @@ export async function POST(req: Request) {
         ? agent.cartesiaAgentId
         : telConfig.cartesiaAgentId;
 
-    if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId) {
+    if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || cartesiaAgentId === "agent_DSSrQj5z4ofsawJ6ZeSvF7" || !cartesiaAgentId) {
       cartesiaAgentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
     }
 
