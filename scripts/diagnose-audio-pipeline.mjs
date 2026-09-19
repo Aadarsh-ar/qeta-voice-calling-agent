@@ -10,8 +10,8 @@
 
 import WebSocket from "ws";
 
-const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY || "sk_car_5p3YKUikhM6jidJWiELStn";
-const CARTESIA_AGENT_ID = process.env.CARTESIA_AGENT_ID || "agent_DSSrQj5z4ofsawJ6ZeSvF7";
+const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+const CARTESIA_AGENT_ID = process.env.CARTESIA_AGENT_ID || "agent_vDCfnuFdJokXJDVxgmHeZx";
 
 console.log("=================================================================");
 console.log("         QETADOTIN AUDIO PIPELINE DIAGNOSTIC SUITE               ");

@@ -16,9 +16,9 @@ export const DEFAULT_TELEPHONY_CONFIG = {
   vobizSipDomain: "f15a55c4.sip.vobiz.ai",
   vobizSipUsername: "qeta_voice_user",
   vobizSipPassword: "QetaVoice2026!",
-  cartesiaApiKey: "sk_car_5p3YKUikhM6jidJWiELStn",
-  cartesiaAgentId: "agent_DSSrQj5z4ofsawJ6ZeSvF7",
-  cartesiaVoiceId: "330c4fa0-1da3-4c55-8e97-951bfd724e20",
+  cartesiaApiKey: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
+  cartesiaAgentId: "agent_vDCfnuFdJokXJDVxgmHeZx",
+  cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
   sarvamApiKey: "sk_scyogavs_kh6r7l2swDulfN6ifZYMZRRF",
   sarvamLanguageCode: "te-IN",
   sarvamModel: "saaras:v3-realtime",
@@ -75,13 +75,12 @@ export function getTelephonyConfig() {
   const vobizSipPassword = getEnvVar("VOBIZ_SIP_PASSWORD", DEFAULT_TELEPHONY_CONFIG.vobizSipPassword);
 
   let cartesiaApiKey = getEnvVar("CARTESIA_API_KEY", DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey);
-  // Bypass stale/unconfigured or exhausted Cartesia keys
-  if (cartesiaApiKey.startsWith("sk_car_kjQ") || cartesiaApiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || cartesiaApiKey.length < 20) {
+  if (cartesiaApiKey.startsWith("sk_car_kjQ") || cartesiaApiKey.length < 20) {
     cartesiaApiKey = DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey;
   }
 
   let cartesiaAgentId = getEnvVar("CARTESIA_AGENT_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId);
-  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || cartesiaAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx" || !cartesiaAgentId.startsWith("agent_")) {
+  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId.startsWith("agent_")) {
     cartesiaAgentId = DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId;
   }
 

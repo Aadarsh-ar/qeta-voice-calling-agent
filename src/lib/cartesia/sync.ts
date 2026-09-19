@@ -47,8 +47,8 @@ const CARTESIA_API_BASE = "https://api.cartesia.ai";
  */
 export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<SyncAgentResult> {
   let apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || !apiKey.startsWith("sk_car_")) {
-    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  if (!apiKey || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   }
 
   if (!params.agentName || params.agentName.trim().length === 0) {
@@ -299,8 +299,8 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
  */
 export async function getCartesiaAgentDetails(agentId: string) {
   let apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || !apiKey.startsWith("sk_car_")) {
-    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  if (!apiKey || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   }
 
   let res = await fetch(`${CARTESIA_API_BASE}/agents/${agentId}`, {

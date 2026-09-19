@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
   let apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
-    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  if (!apiKey || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   }
   const url = new URL(req.url);
   let resolvedAgentId = (url.searchParams.get("agentId") || "").trim();
@@ -19,11 +19,11 @@ export async function GET(req: Request) {
     }
   }
 
-  if ((!resolvedAgentId || resolvedAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx") && process.env.CARTESIA_AGENT_ID) {
-    resolvedAgentId = process.env.CARTESIA_AGENT_ID === "agent_vDCfnuFdJokXJDVxgmHeZx" ? "agent_DSSrQj5z4ofsawJ6ZeSvF7" : process.env.CARTESIA_AGENT_ID;
+  if (!resolvedAgentId && process.env.CARTESIA_AGENT_ID) {
+    resolvedAgentId = process.env.CARTESIA_AGENT_ID;
   }
-  if (!resolvedAgentId || resolvedAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx") {
-    resolvedAgentId = "agent_DSSrQj5z4ofsawJ6ZeSvF7";
+  if (!resolvedAgentId) {
+    resolvedAgentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
   }
 
   if (!resolvedAgentId) {
@@ -69,8 +69,8 @@ export async function GET(req: Request) {
 
 export async function POST() {
   let apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
-    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  if (!apiKey || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   }
   try {
     const res = await fetch("https://api.cartesia.ai/v1/agents", {
