@@ -223,10 +223,12 @@ export async function POST(req: Request) {
           telephonyReason = "Call initiated via Cartesia Realtime Agent Runtime (Vobiz SIP Trunk)";
           telephonyDetails = JSON.stringify(cartesiaCallData);
           cartesiaDispatched = true;
-        } else if (callResult?.error) {
-          console.warn("[CARTESIA OUTBOUND] Cartesia call error, trying fallback:", callResult.error);
+        } else {
+          telephonyDetails = `Cartesia returned status ${cartesiaCallRes.status}: ${JSON.stringify(cartesiaCallData)}`;
+          console.warn("[CARTESIA OUTBOUND] Cartesia call attempt unconfirmed, trying fallback:", telephonyDetails);
         }
-      } catch (cErr) {
+      } catch (cErr: any) {
+        telephonyDetails = `Cartesia exception: ${cErr?.message || cErr}`;
         console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception, trying fallback:", cErr);
       }
     }

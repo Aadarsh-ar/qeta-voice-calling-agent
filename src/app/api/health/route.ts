@@ -51,7 +51,7 @@ export async function GET() {
     {
       status: isAllHealthy ? "OK" : "DEGRADED",
       timestamp: new Date().toISOString(),
-      version: "1.0.0-livekit-production",
+      version: "1.0.1-cartesia-edge-calling-cef5110",
       services: checks,
     },
     { status: isAllHealthy ? 200 : 503 }
