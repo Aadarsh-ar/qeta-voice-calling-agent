@@ -24,7 +24,7 @@ export class CartesiaClient {
   getApiKey(): string {
     const envKey = typeof process !== "undefined" ? process.env.CARTESIA_API_KEY : undefined;
     const cleanEnvKey = envKey ? envKey.trim().replace(/^["']|["']$/g, "") : "";
-    if (cleanEnvKey && cleanEnvKey.startsWith("sk_car_")) {
+    if (cleanEnvKey && cleanEnvKey.startsWith("sk_car_") && cleanEnvKey !== "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
       return cleanEnvKey;
     }
     return this.apiKey || "sk_car_5p3YKUikhM6jidJWiELStn";

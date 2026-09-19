@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 500 });
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
+    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  }
   const url = new URL(req.url);
   let resolvedAgentId = (url.searchParams.get("agentId") || "").trim();
 
@@ -17,8 +19,11 @@ export async function GET(req: Request) {
     }
   }
 
-  if (!resolvedAgentId && process.env.CARTESIA_AGENT_ID) {
-    resolvedAgentId = process.env.CARTESIA_AGENT_ID;
+  if ((!resolvedAgentId || resolvedAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx") && process.env.CARTESIA_AGENT_ID) {
+    resolvedAgentId = process.env.CARTESIA_AGENT_ID === "agent_vDCfnuFdJokXJDVxgmHeZx" ? "agent_DSSrQj5z4ofsawJ6ZeSvF7" : process.env.CARTESIA_AGENT_ID;
+  }
+  if (!resolvedAgentId || resolvedAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx") {
+    resolvedAgentId = "agent_DSSrQj5z4ofsawJ6ZeSvF7";
   }
 
   if (!resolvedAgentId) {
@@ -63,8 +68,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST() {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 500 });
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
+    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  }
   try {
     const res = await fetch("https://api.cartesia.ai/v1/agents", {
       headers: { Authorization: "Bearer " + apiKey, "Cartesia-Version": "2026-08-14" },

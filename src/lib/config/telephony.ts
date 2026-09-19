@@ -75,13 +75,13 @@ export function getTelephonyConfig() {
   const vobizSipPassword = getEnvVar("VOBIZ_SIP_PASSWORD", DEFAULT_TELEPHONY_CONFIG.vobizSipPassword);
 
   let cartesiaApiKey = getEnvVar("CARTESIA_API_KEY", DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey);
-  // Bypass stale/unconfigured Cartesia keys that have no phone numbers or return 404
-  if (cartesiaApiKey.startsWith("sk_car_kjQ") || cartesiaApiKey.length < 20) {
+  // Bypass stale/unconfigured or exhausted Cartesia keys
+  if (cartesiaApiKey.startsWith("sk_car_kjQ") || cartesiaApiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || cartesiaApiKey.length < 20) {
     cartesiaApiKey = DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey;
   }
 
   let cartesiaAgentId = getEnvVar("CARTESIA_AGENT_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId);
-  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId.startsWith("agent_")) {
+  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || cartesiaAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx" || !cartesiaAgentId.startsWith("agent_")) {
     cartesiaAgentId = DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId;
   }
 

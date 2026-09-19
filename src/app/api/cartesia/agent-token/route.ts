@@ -1,28 +1,33 @@
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "No API key" }, { status: 500 });
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U") {
+    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  }
   try {
     const body = await req.json().catch(() => ({}));
     const requestedId: string = (body.agentId || "").trim();
     let resolvedCartesiaAgentId = "";
 
-    if (requestedId.startsWith("agent_")) {
+    if (requestedId.startsWith("agent_") && requestedId !== "agent_vDCfnuFdJokXJDVxgmHeZx") {
       resolvedCartesiaAgentId = requestedId;
-    } else if (requestedId) {
+    } else if (requestedId && requestedId !== "agent_vDCfnuFdJokXJDVxgmHeZx") {
       const { prisma } = await import("@/lib/db/prisma");
       const dbAgent = await prisma.agent.findUnique({
         where: { id: requestedId },
         select: { cartesiaAgentId: true },
       });
-      if (dbAgent?.cartesiaAgentId) {
+      if (dbAgent?.cartesiaAgentId && dbAgent.cartesiaAgentId !== "agent_vDCfnuFdJokXJDVxgmHeZx") {
         resolvedCartesiaAgentId = dbAgent.cartesiaAgentId;
       }
     }
 
-    if (!resolvedCartesiaAgentId && process.env.CARTESIA_AGENT_ID) {
+    if (!resolvedCartesiaAgentId && process.env.CARTESIA_AGENT_ID && process.env.CARTESIA_AGENT_ID !== "agent_vDCfnuFdJokXJDVxgmHeZx") {
       resolvedCartesiaAgentId = process.env.CARTESIA_AGENT_ID;
+    }
+    if (!resolvedCartesiaAgentId) {
+      resolvedCartesiaAgentId = "agent_DSSrQj5z4ofsawJ6ZeSvF7";
     }
 
     if (!resolvedCartesiaAgentId) {

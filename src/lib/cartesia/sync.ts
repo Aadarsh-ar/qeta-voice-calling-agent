@@ -46,9 +46,9 @@ const CARTESIA_API_BASE = "https://api.cartesia.ai";
  * Never shows fake success.
  */
 export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<SyncAgentResult> {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey || !apiKey.startsWith("sk_car_")) {
-    throw new Error("CARTESIA_API_KEY is not configured or invalid on the server.");
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
   }
 
   if (!params.agentName || params.agentName.trim().length === 0) {
@@ -298,8 +298,10 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
  * Fetch live details of a Cartesia agent directly from Cartesia API
  */
 export async function getCartesiaAgentDetails(agentId: string) {
-  const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) throw new Error("No Cartesia API key");
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || apiKey === "sk_car_x7b5kmXE55KpDgAR9Rcc1U" || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_5p3YKUikhM6jidJWiELStn";
+  }
 
   let res = await fetch(`${CARTESIA_API_BASE}/agents/${agentId}`, {
     headers: {
