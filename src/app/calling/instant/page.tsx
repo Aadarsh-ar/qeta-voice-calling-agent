@@ -48,7 +48,7 @@ export default function InstantLeadsPage() {
       name: "Srinivas Rao",
       phone: "+91 98480 22331",
       source: "Meta Ads (Hyd)",
-      employee: "Priya (Telugu Cloned)",
+      employee: "Harika (Telugu Cloned)",
       status: "QUALIFIED",
       intent: "Site Visit Confirmed this Saturday 11 AM",
       time: "2 mins ago",
@@ -58,7 +58,7 @@ export default function InstantLeadsPage() {
       name: "Kavitha Reddy",
       phone: "+91 99890 44552",
       source: "Website Form",
-      employee: "Priya (Telugu Cloned)",
+      employee: "Harika (Telugu Cloned)",
       status: "FOLLOW_UP",
       intent: "Asked for brochure on WhatsApp first",
       time: "14 mins ago",
@@ -112,7 +112,7 @@ export default function InstantLeadsPage() {
         name: leadName || "Direct Lead",
         phone: formattedPhone,
         source: leadSource,
-        employee: "Priya (Telugu Cloned)",
+        employee: "Harika (Telugu Cloned)",
         status: "DIALING",
         intent: notes || "Initial Inquiry Qualification",
         time: "Just now",
@@ -249,7 +249,7 @@ export default function InstantLeadsPage() {
                     onChange={(e) => setSelectedAgent(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                   >
-                    <option value="cmu40722800014r20hvl070n3">Priya — Lead Qualification (Telugu/Tenglish)</option>
+                    <option value="cmu40722800014r20hvl070n3">Harika — Lead Qualification (Telugu/Tenglish)</option>
                     <option value="cmu40722800024r20hvl070n4">Rahul — Customer Support & Inquiry (English)</option>
                     <option value="cmu40722800034r20hvl070n5">Sneha — Tele-sales & Payment Renewal</option>
                   </select>

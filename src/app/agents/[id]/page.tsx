@@ -829,9 +829,6 @@ export default function AgentDetailPage({
                         onChange={(e) => setCartesiaVoiceId(e.target.value)}
                         className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
                       >
-                        <option value="93d9c1de-e167-44c6-8e39-b4440c106a1d">
-                          Priya (Cloned Telugu Voice - Female)
-                        </option>
                         <option value="41508a7d-4839-445f-ba7f-687f620ed0e7">
                           Harika (Telugu Faculty Voice - Female)
                         </option>

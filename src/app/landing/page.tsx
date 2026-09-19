@@ -57,7 +57,7 @@ export default function LandingPage() {
       id: "demo-tenglish",
       lang: "Tenglish",
       role: "E-Commerce COD Order Verification",
-      voice: "Voice: Priya (Bilingual Neutral)",
+      voice: "Voice: Harika (Telugu Conversational)",
       text: "Hi sir! QETADOTIN store nunchi call chestunnam. Me order #8492 confirm cheskovadaniki call chesam. Can we dispatch it today?",
       duration: "0:12",
     },
@@ -137,7 +137,7 @@ export default function LandingPage() {
           ...prev,
           `[00:01] Telecom Handshake Established: ${data.callId || "VOBIZ_PSTN_LIVE"}`,
           `[00:02] Telugu Cloned Voice Engine Active (Cartesia Sonic-3.6 @ 8kHz)`,
-          `[00:03] Call in progress! Answer your phone to speak with Priya.`,
+          `[00:03] Call in progress! Answer your phone to speak with Harika.`,
         ]);
       } else {
         setCallStatus("connected");
@@ -295,7 +295,7 @@ export default function LandingPage() {
                       AD
                     </div>
                     <div>
-                      <h4 className="text-white font-bold text-base">Priya (Lead Specialist)</h4>
+                      <h4 className="text-white font-bold text-base">Harika (Telugu Voice Specialist)</h4>
                       <p className="text-xs text-slate-400">Cartesia Cloned Voice • Telugu & English</p>
                     </div>
                   </div>

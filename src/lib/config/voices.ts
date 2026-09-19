@@ -10,15 +10,6 @@ export interface VoiceOption {
 
 export const AVAILABLE_VOICES: VoiceOption[] = [
   {
-    id: "93d9c1de-e167-44c6-8e39-b4440c106a1d",
-    name: "Priya (Cloned Telugu Voice)",
-    gender: "Female",
-    language: "Telugu & Tenglish",
-    description: "Natural conversational Telugu & English bilingual cloned voice",
-    model: "sonic-3.6",
-    isCloned: true,
-  },
-  {
     id: "41508a7d-4839-445f-ba7f-687f620ed0e7",
     name: "Harika (Telugu Faculty Voice)",
     gender: "Female",
@@ -38,4 +29,4 @@ export const AVAILABLE_VOICES: VoiceOption[] = [
   },
 ];
 
-export const DEFAULT_VOICE_ID = "93d9c1de-e167-44c6-8e39-b4440c106a1d";
+export const DEFAULT_VOICE_ID = "41508a7d-4839-445f-ba7f-687f620ed0e7";

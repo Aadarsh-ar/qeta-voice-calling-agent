@@ -129,7 +129,7 @@ export default function InboundCallsPage() {
                   onChange={(e) => setAssignedAgent(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                 >
-                  <option value="cmu40722800014r20hvl070n3">Priya — Lead Qualification & Reception (Telugu/Tenglish)</option>
+                  <option value="cmu40722800014r20hvl070n3">Harika — Lead Qualification & Reception (Telugu/Tenglish)</option>
                   <option value="cmu40722800024r20hvl070n4">Rahul — Customer Support & Inquiry (English)</option>
                   <option value="cmu40722800034r20hvl070n5">Sneha — Tele-sales & Payment Renewal</option>
                 </select>
@@ -208,7 +208,7 @@ export default function InboundCallsPage() {
                   <div className="w-5 h-5 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
                     3
                   </div>
-                  <p>Priya answers in Telugu or English, resolves queries, and captures caller contact details.</p>
+                  <p>Harika answers in Telugu or English, resolves queries, and captures caller contact details.</p>
                 </div>
                 <div className="flex items-start gap-2.5">
                   <div className="w-5 h-5 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">

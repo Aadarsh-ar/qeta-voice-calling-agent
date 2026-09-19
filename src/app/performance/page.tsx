@@ -26,7 +26,7 @@ export default function PerformancePage() {
   ];
 
   const agentScores = [
-    { name: "Priya (Lead Qualification)", csat: "4.8 / 5", calls: "1,240", avgDuration: "2m 14s", conversion: "34%" },
+    { name: "Harika (Lead Qualification)", csat: "4.8 / 5", calls: "1,240", avgDuration: "2m 14s", conversion: "34%" },
     { name: "Rahul (Customer Support)", csat: "4.7 / 5", calls: "980", avgDuration: "1m 45s", conversion: "28%" },
     { name: "Sneha (Tele-sales & Renewal)", csat: "4.9 / 5", calls: "770", avgDuration: "3m 02s", conversion: "42%" },
   ];

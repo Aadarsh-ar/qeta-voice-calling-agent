@@ -125,7 +125,7 @@ export default function TrainEmployeesPage() {
                 onChange={(e) => setSelectedEmployee(e.target.value)}
                 className="font-bold text-slate-900 text-base bg-transparent border-none focus:outline-hidden cursor-pointer"
               >
-                <option value="cmu40722800014r20hvl070n3">Priya — Lead Qualification (Telugu / Tenglish Cloned)</option>
+                <option value="cmu40722800014r20hvl070n3">Harika — Lead Qualification (Telugu / Tenglish Cloned)</option>
                 <option value="cmu40722800024r20hvl070n4">Rahul — Customer Support & Inquiry (Indian English)</option>
                 <option value="cmu40722800034r20hvl070n5">Sneha — Tele-sales & Payment Renewal</option>
               </select>
@@ -282,7 +282,7 @@ export default function TrainEmployeesPage() {
               </div>
 
               <p className="text-xs text-slate-400 leading-relaxed">
-                Test how Priya or Rahul responds to questions or objections using your newly updated knowledge.
+                Test how Harika or Rahul responds to questions or objections using your newly updated knowledge.
               </p>
 
               <div>
