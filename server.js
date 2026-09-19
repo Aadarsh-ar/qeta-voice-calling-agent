@@ -543,6 +543,40 @@ You are on a LIVE, REAL-TIME PHONE CALL with a customer.
   };
 }
 
+// ─── Centralized Call Termination & Conversation End Controller (Rules 10-15) ─
+const terminatingCalls = new Set();
+
+function endCallServer({ callId, reason, audioWaitMs = 0, disconnectFn }) {
+  if (!callId) return;
+  if (terminatingCalls.has(callId)) {
+    console.log(`[END_CALL_LOCKED] Call ${callId} already terminating. Duplicate skipped.`);
+    return;
+  }
+  terminatingCalls.add(callId);
+
+  const isIntentional = ["USER_ENDED", "AGENT_ENDED", "CONVERSATION_COMPLETED"].includes(reason);
+  const classification = isIntentional ? "INTENTIONAL_CONVERSATION_END" : "PREMATURE_DISCONNECT";
+
+  console.log(`[CALL_TERMINATION_INITIATED] callId=${callId} reason=${reason} classification=${classification} audioWaitMs=${audioWaitMs}`);
+
+  const state = activeCallStates.get(callId);
+  if (state) {
+    state.active = false;
+    state.stage = "ENDED";
+  }
+
+  // Ensure audio finishes playing completely before disconnecting line
+  const delay = Math.max(audioWaitMs, 800);
+  setTimeout(() => {
+    try {
+      console.log(`[CALL_TERMINATION_EXECUTING] Dropping line for ${callId} after audio completion (${delay}ms)`);
+      if (typeof disconnectFn === "function") disconnectFn();
+    } catch (err) {
+      console.error(`[CALL_TERMINATION_ERROR] ${err.message}`);
+    }
+  }, delay);
+}
+
 // ─── ITU-T G.711 μ-law Companding & Office Ambience Audio Mixer ──────────────
 function linear2ulaw(sample) {
   const BIAS = 0x84;
@@ -865,11 +899,16 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
         console.log("[CARTESIA_AGENT] Tool call:", JSON.stringify(msg));
         const toolName = msg.name || msg.function?.name || msg.tool_call?.name;
         if (toolName === "end_call") {
-          console.log("[CARTESIA_AGENT] End call tool triggered — hanging up cleanly");
-          setTimeout(() => {
-            try { vobizWs.close(1000, "Cartesia agent ended call"); } catch {}
-            try { cartesiaWs.close(1000, "End call"); } catch {}
-          }, 1500);
+          console.log("[CARTESIA_AGENT] End call tool triggered — waiting for final closing sentence to finish playing before hangup");
+          endCallServer({
+            callId: streamId,
+            reason: "CONVERSATION_COMPLETED",
+            audioWaitMs: 3500, // 3.5s buffer for spoken closing sentence to finish
+            disconnectFn: () => {
+              try { vobizWs.close(1000, "Cartesia agent ended call"); } catch {}
+              try { cartesiaWs.close(1000, "End call"); } catch {}
+            },
+          });
         }
       }
 
@@ -1398,14 +1437,17 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
         sendAudioToVobiz(ws, streamId, audioBuf);
         console.log(`[LISTENING] Spoken turn delivered. Listening for customer speech...`);
 
-        // If turn instructed to end call, hang up gracefully after playback
+        // If turn instructed to end call, hang up gracefully after full audio playback
         if (shouldEndCall) {
-          setTimeout(() => {
-            console.log("[LATENCY_TRACE] CALL_ENDED → Turn requested hang up. Closing stream.");
-            try {
-              ws.close(1000, "Call finished");
-            } catch {}
-          }, durationMs + 800);
+          endCallServer({
+            callId: streamId,
+            reason: "CONVERSATION_COMPLETED",
+            audioWaitMs: durationMs + 800,
+            disconnectFn: () => {
+              console.log("[LATENCY_TRACE] CALL_ENDED → Turn finished and audio completed. Closing stream.");
+              try { ws.close(1000, "Call finished"); } catch {}
+            },
+          });
         }
       }
     } catch (err) {

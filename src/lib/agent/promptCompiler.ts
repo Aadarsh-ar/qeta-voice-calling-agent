@@ -54,7 +54,19 @@ ${
     : isPureTelugu
     ? `- Speak polite, natural everyday Telugu (e.g., "అవునండి", "చెప్పండి అండి", "ఖచ్చితంగా అండి"). Avoid bookish formal prose.`
     : `- Speak natural everyday Telugu and Tenglish (Telugu + English mix) as spoken in Andhra Pradesh and Telangana. Keep everyday business words (order, number, refund, delivery, slot, pricing) in English.`
-}`);
+}
+
+[CONVERSATION END & AUTO-HANGUP RULES (STRICT)]
+1. Keep the call active during the entire natural conversation.
+2. NEVER terminate the call because of temporary silence, pauses, thinking time, or network delays.
+3. The call should terminate ONLY when the conversation has clearly ended or objective is fully achieved.
+4. Detect explicit user endings:
+   - English: "bye", "goodbye", "thank you, bye", "that's all", "I'm done", "no more questions"
+   - Telugu/Tenglish: "బై", "థాంక్యూ బై", "ఇంక చాలు", "సరే మరి", "ఇంకేమీ లేదు", "అంతే అండి"
+5. When the user says goodbye or the call objective is complete, ALWAYS deliver a warm, short natural closing:
+   ${isEnglish ? '"Thank you! Have a great day. Bye!"' : '"థాంక్యూ అండి! హావ్ ఎ గ్రేట్ డే, బై!"'}
+6. IMPORTANT: Always finish speaking the closing sentence BEFORE terminating the call. Never drop the line mid-sentence.
+7. Inactivity rule: If the caller is silent for an extended period, ask: ${isEnglish ? '"Are you still there?"' : '"హలో అండి, లైన్ లో ఉన్నారా?"'} before concluding.`);
 
   // ── PRIORITY 3: Configured User Instructions ──────────────────────────────
   sections.push(`[AGENT PERSONA & BEHAVIOR]

@@ -43,6 +43,21 @@ export function buildAgentSystemPrompt(context: AgentContext): string {
     `   - NEVER invent or hallucinate facts not provided in the business knowledge below.`,
     `   - If you do not know an answer, politely offer to connect them with a team member or arrange a callback.`,
     ``,
+    `# CONVERSATION END & AUTO-HANGUP RULES (STRICT)`,
+    `1. Keep the call active during the entire natural conversation.`,
+    `2. NEVER terminate the call because of temporary silence, user pauses, thinking time, or network delays.`,
+    `3. The call should terminate ONLY when the conversation has clearly ended or objective is achieved.`,
+    `4. Detect explicit user endings:`,
+    `   - English: "bye", "goodbye", "thank you, bye", "that's all", "I'm done", "no more questions"`,
+    `   - Telugu/Tenglish: "బై", "థాంక్యూ బై", "ఇంక చాలు", "సరే మరి", "ఇంకేమీ లేదు", "అంతే అండి"`,
+    `5. The agent can end the call when the conversation objective is completed and there is no useful reason to continue.`,
+    `6. Before terminating, ALWAYS speak a warm, short natural closing:`,
+    isTenglish
+      ? `   "థాంక్యూ అండి! హావ్ ఎ గ్రేట్ డే, బై!"`
+      : `   "Thank you! Have a great day. Bye!"`,
+    `7. IMPORTANT: Finish speaking the closing sentence BEFORE disconnecting the call. Never terminate mid-sentence.`,
+    `8. Inactivity rule: If caller is silent for a prolonged period, ask "హలో అండి, లైన్ లో ఉన్నారా?" before concluding.`,
+    ``,
   ];
 
   if (context.businessName || context.businessDescription || context.productsServices) {

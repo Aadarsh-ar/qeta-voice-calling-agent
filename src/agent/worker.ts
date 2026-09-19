@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { prisma } from "../lib/db/prisma.js";
 import { compileAgentVoicePrompt, compileAgentGreeting } from "./prompt.js";
 import { AGENT_TOOLS, executeToolCall } from "../lib/agent/tools.js";
+import { endCall, EndCallReason } from "../lib/telephony/hangupController.js";
 
 // 24/7 Production credential fallbacks — never fail even if env vars are missing
 const FALLBACKS: Record<string, string> = {
@@ -234,11 +235,17 @@ Visitor conversation ముగించాలనుకుంటే:
           console.log(`[QETA Tool Call] Executing ${t.function.name}:`, args);
           const result = await executeToolCall(t.function.name, args);
           if (t.function.name === "end_call") {
-            setTimeout(async () => {
-              try {
-                await ctx.room.disconnect();
-              } catch {}
-            }, 3000);
+            console.log(`[QETA Tool Call] end_call triggered for room ${ctx.room.name}, ensuring closing sentence finishes`);
+            endCall({
+              callId: callId || ctx.room.name,
+              reason: EndCallReason.CONVERSATION_COMPLETED,
+              audioDurationMs: 3500, // 3.5s buffer for spoken closing sentence to finish
+              disconnectFn: async () => {
+                try {
+                  await ctx.room.disconnect();
+                } catch {}
+              },
+            });
           }
           return JSON.stringify(result);
         },

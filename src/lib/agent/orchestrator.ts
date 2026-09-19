@@ -184,13 +184,17 @@ export class AgentOrchestrator {
       return true;
     });
 
+    // Import centralized ending detector from hangupController
+    const { detectExplicitUserEnding, getSpokenClosingPhrase } = await import("../telephony/hangupController");
+    const explicitEnding = detectExplicitUserEnding(userUtterance);
+
     // Intent recognition & proactive tool matching
     const isOrderQuery = /(order|ఆర్డర్|నంబర్|number|status|ఎక్కడ|ట్రాక్|track|delivery|డెలివరీ|రాలేదు|dispatch)/i.test(userUtterance);
     const hasDigits = /\b\d{3,}\b/.test(userUtterance);
     const historyHasOrderFlow = history.slice(-3).some((h) => /(order|ఆర్డర్|నంబర్|number|చెప్పగలరా|status)/i.test(h.content));
     const isBookingQuery = /(appointment|డెమో|demo|బుక్|షెడ్యూల్|slot|meeting|కాల్|call)/i.test(userUtterance);
     const isTransferQuery = /(transfer|మాట్లాడాలి|human|manager|operator|agent|escalat)/i.test(userUtterance);
-    const isEndCallQuery = /(బాయ్|bye|థాంక్స్|thanks|సరిపోయింది|ఇంకేం లేదు|done|over)/i.test(userUtterance);
+    const isEndCallQuery = explicitEnding.isEnding;
     const isRefundQuery = /(refund|రీఫండ్|రిటర్న్|return|రద్దు|cancel)/i.test(userUtterance);
     const isPricingQuery = /(ధర|price|cost|ఫీజు|plans|pricing)/i.test(userUtterance);
 
@@ -376,6 +380,14 @@ export class AgentOrchestrator {
         rawText = `${biz.businessName} ఆఫీస్ ${biz.location || "హైదరాబాద్ లో"} ఉంది అండి. మీరు ఎప్పుడైనా విజిట్ చేయవచ్చు.`;
       } else if (lower.includes("డెమో") || lower.includes("demo") || lower.includes("అపాయింట్")) {
         rawText = "తప్పకుండా అండి! రేపు ఉదయం 10:30 కి డెమో లేదా అపాయింట్‌మెంట్ కన్ఫర్మ్ చేయనా?";
+      }
+    }
+
+    // Explicit Ending & Auto-Hangup Guarantee (Rules 4, 5, 6, 7)
+    if (explicitEnding.isEnding) {
+      shouldEndCall = true;
+      if (!rawText || rawText.trim().length === 0 || !/(బై|bye|హావ్ ఎ|ధన్యవాదాలు|thank|గ్రేట్ డే)/i.test(rawText)) {
+        rawText = getSpokenClosingPhrase(agent.language);
       }
     }
 
