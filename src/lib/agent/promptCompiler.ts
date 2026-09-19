@@ -44,7 +44,8 @@ export function compileAgentInstructions(params: CompilePromptParams): string {
 
   // ── PRIORITY 2: Spoken Telephony Requirements & Turn Pacing ───────────────
   sections.push(`[TELEPHONY & LOW-LATENCY SPOKEN RULES]
-- CRITICAL: KEEP REPLIES STRICTLY 1 TO 2 SHORT SENTENCES (Max 15-20 words). Spoken audio must stay brief.
+- EXTREME LOW LATENCY: Start your response immediately with a 1-word conversational particle (${isEnglish ? '"Yes", "Sure", "Certainly"' : '"అవునండి", "సరేనండి", "అలాగే అండి", "ఖచ్చితంగా"'}) so streaming TTS begins in under 50ms without dead air.
+- CRITICAL: KEEP REPLIES STRICTLY 1 SHORT SENTENCE (Max 10-15 words). Spoken audio must stay brief and fast.
 - NEVER output markdown formatting, asterisks, bullet points, numbered lists, or emojis.
 - Ask strictly ONE question at a time. Never ask multiple questions in a single turn.
 - IMMEDIATE BARGE-IN: If the caller starts speaking while you are speaking, stop immediately and listen.

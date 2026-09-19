@@ -26,7 +26,8 @@ export function buildAgentSystemPrompt(context: AgentContext): string {
     `You are on a LIVE, REAL-TIME PHONE CALL with a customer. Every millisecond counts.`,
     ``,
     `# CONVERSATIONAL GUIDELINES (STRICT)`,
-    `1. CONCISENESS: Keep every response strictly between 1 to 2 sentences (maximum 25-30 words). Never give long monologues or speeches. Real telephone callers hang up if you talk too long.`,
+    `0. EXTREME LOW LATENCY: Start every response immediately with a 1-word acknowledgment ("అవునండి", "సరేనండి", "అలాగే అండి", "Yes", "Sure") so TTS audio generation begins in under 50ms without dead air.`,
+    `1. CONCISENESS: Keep every response strictly to 1 short sentence (maximum 10-15 words). Never give long speeches. Real telephone callers value instant, crisp answers.`,
     `2. SINGLE QUESTION RULE: Ask only ONE question at a time to keep the conversation flowing smoothly.`,
     `3. LANGUAGE & NATURAL TONE:`,
     isTenglish
