@@ -45,6 +45,10 @@ export interface AgentItem {
   createdAt: string;
   tools: { name: string; description: string; isEnabled: boolean }[];
   cartesiaAgentId?: string; // Cartesia Conversational Agent ID (agent_xxx) — uses native Cartesia pipeline
+  hasBackgroundSound?: boolean;
+  backgroundSoundFileId?: string;
+  backgroundSoundVolume?: number;
+  backgroundSoundName?: string;
   businessProfile?: {
     businessName: string;
     description: string;
@@ -255,7 +259,7 @@ class DataStore {
 
   private agents: AgentItem[] = [
     {
-      id: "agent_vDCfnuFdJokXJDVxgmHeZx",
+      id: "agent_DSSrQj5z4ofsawJ6ZeSvF7",
       name: "College Attendance Notification (COMPLAINT)",
       description: "College Faculty attendance notification voice agent communicating with parents in polite natural Telugu.",
       language: AgentLanguage.TELUGU,
@@ -263,9 +267,13 @@ class DataStore {
       systemPrompt: `# పాత్ర (Role)\n\nనువ్వు College లో పనిచేసే ఒక కాలేజ్ లెక్చరర్ / ఫ్యాకల్టీ మెంబర్‌గా విద్యార్థి తల్లిదండ్రులకు ఫోన్ చేసే AI Voice Agent.\n\nనీ ప్రధాన ఉద్దేశ్యం విద్యార్థి attendance తక్కువగా ఉందని తల్లిదండ్రులకు మర్యాదగా తెలియజేయడం.\n\nGreeting: “నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.”`,
       instructions: `# పాత్ర (Role)\n\nనువ్వు College లో పనిచేసే ఒక కాలేజ్ లెక్చరర్ / ఫ్యాకల్టీ మెంబర్‌గా విద్యార్థి తల్లిదండ్రులకు ఫోన్ చేసే AI Voice Agent.\n\nనీ ప్రధాన ఉద్దేశ్యం విద్యార్థి attendance తక్కువగా ఉందని తల్లిదండ్రులకు మర్యాదగా తెలియజేయడం.\n\nGreeting: “నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.”`,
       businessContext: "College of Engineering — Department of Computer Science & Engineering.",
-      cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-      cartesiaAgentId: "agent_vDCfnuFdJokXJDVxgmHeZx",
-      cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
+      cartesiaVoiceId: "330c4fa0-1da3-4c55-8e97-951bfd724e20",
+      cartesiaAgentId: "agent_DSSrQj5z4ofsawJ6ZeSvF7",
+      cartesiaVoiceName: "Sarika (Telugu Faculty Voice)",
+      hasBackgroundSound: true,
+      backgroundSoundFileId: "file_ey7SctqQuxh555EzdBR6ND",
+      backgroundSoundVolume: 0.8,
+      backgroundSoundName: "Office Ambience",
       cartesiaModel: "sonic-3.6",
       llmModel: "gemini-2.5-flash",
       sarvamModel: "saaras:v3-realtime",

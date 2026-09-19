@@ -84,9 +84,9 @@ const DEFAULT_ENV_FALLBACKS = {
   VOBIZ_SIP_USERNAME: "qeta_voice_user",
   VOBIZ_SIP_PASSWORD: "QetaVoice2026!",
   // Cartesia TTS
-  CARTESIA_API_KEY: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
-  CARTESIA_AGENT_ID: "agent_vDCfnuFdJokXJDVxgmHeZx",
-  CARTESIA_VOICE_ID: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+  CARTESIA_API_KEY: "sk_car_5p3YKUikhM6jidJWiELStn",
+  CARTESIA_AGENT_ID: "agent_DSSrQj5z4ofsawJ6ZeSvF7",
+  CARTESIA_VOICE_ID: "330c4fa0-1da3-4c55-8e97-951bfd724e20",
   // LiveKit Cloud (WebRTC realtime voice)
   LIVEKIT_URL: "wss://ai-voice-agent-44qkuva3.livekit.cloud",
   LIVEKIT_API_KEY: "API6S2vyxFt6xvW",

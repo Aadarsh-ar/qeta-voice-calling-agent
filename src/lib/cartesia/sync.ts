@@ -19,6 +19,8 @@ export interface SyncAgentParams extends CompilePromptParams {
   initialMessage?: string;
   customGreeting?: string;
   transferPhoneNumber?: string;
+  backgroundSoundFileId?: string | null;
+  backgroundVolume?: number | null;
 }
 
 export interface SyncAgentResult {
@@ -30,6 +32,9 @@ export interface SyncAgentResult {
   initialMessage: string;
   voiceId: string;
   language: string;
+  hasBackgroundSound?: boolean;
+  backgroundSoundFileId?: string | null;
+  backgroundSoundVolume?: number | null;
 }
 
 const CARTESIA_API_VERSION = "2026-08-14";
@@ -80,10 +85,15 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     llm_introduce: finalGreeting,
     tts_voice: voiceId,
     tts_language: languageCode,
-    background_sound_file_id: null,
-    background_volume: 0,
     noise_suppression_level: 0,
   };
+
+  if (params.backgroundSoundFileId !== undefined) {
+    payload.background_sound_file_id = params.backgroundSoundFileId;
+  }
+  if (params.backgroundVolume !== undefined) {
+    payload.background_volume = params.backgroundVolume;
+  }
 
   const hasExistingAgent = Boolean(params.cartesiaAgentId && params.cartesiaAgentId.trim().startsWith("agent_"));
   const targetAgentId = params.cartesiaAgentId?.trim();
@@ -232,6 +242,8 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
   let liveGreeting = finalGreeting;
   let liveVoiceId = voiceId;
   let liveLanguage = languageCode;
+  let liveBgSoundFileId: string | null = null;
+  let liveBgVolume: number | null = null;
 
   try {
     const verifyRes = await fetch(`${CARTESIA_API_BASE}/agents/${resultingAgentId}`, {
@@ -257,7 +269,9 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
       if (verifyData.tts_language) {
         liveLanguage = verifyData.tts_language;
       }
-      console.log(`[CARTESIA_SYNC_VERIFIED] Agent ${resultingAgentId} confirmed active in ${Date.now() - t0}ms (Instructions length: ${liveInstructions.length})`);
+      liveBgSoundFileId = verifyData.background_sound_file_id || verifyData.config?.audio?.output?.background_sound?.file_id || null;
+      liveBgVolume = verifyData.background_volume ?? verifyData.config?.audio?.output?.background_sound?.volume ?? null;
+      console.log(`[CARTESIA_SYNC_VERIFIED] Agent ${resultingAgentId} confirmed active in ${Date.now() - t0}ms (Instructions length: ${liveInstructions.length}, bgSound: ${liveBgSoundFileId || "none"})`);
     }
   } catch (verifyErr) {
     console.warn(`[CARTESIA_VERIFY_WARN] Verification check timed out, proceeding with primary result:`, verifyErr);
@@ -274,6 +288,9 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
     initialMessage: liveGreeting,
     voiceId: liveVoiceId,
     language: liveLanguage,
+    hasBackgroundSound: Boolean(liveBgSoundFileId),
+    backgroundSoundFileId: liveBgSoundFileId,
+    backgroundSoundVolume: liveBgVolume,
   };
 }
 

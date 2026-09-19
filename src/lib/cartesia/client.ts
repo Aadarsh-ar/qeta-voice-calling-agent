@@ -27,7 +27,7 @@ export class CartesiaClient {
     if (cleanEnvKey && cleanEnvKey.startsWith("sk_car_")) {
       return cleanEnvKey;
     }
-    return this.apiKey || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    return this.apiKey || "sk_car_5p3YKUikhM6jidJWiELStn";
   }
 
   isConfigured(): boolean {
@@ -101,7 +101,7 @@ export class CartesiaClient {
       throw new Error("Cartesia API key is not configured.");
     }
 
-    const MASTER_KEY = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    const MASTER_KEY = "sk_car_5p3YKUikhM6jidJWiELStn";
     const primaryKey = this.getApiKey();
 
     const payload = {
