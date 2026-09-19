@@ -79,16 +79,22 @@ export async function GET(
     }
   }
 
-  // Determine authoritative fields: Cartesia live data > DB data > in-memory store
+  // Determine authoritative fields: Site Database is ALWAYS the single source of truth!
+  // The user sets instructions on our site, and our site controls Cartesia, never the reverse.
   const liveInstructions =
-    liveCartesiaData?.llm_system_prompt !== undefined
-      ? liveCartesiaData.llm_system_prompt
-      : (dbAgent?.instructions || dbAgent?.systemPrompt || existingStoreAgent?.systemPrompt || "");
+    dbAgent?.instructions ||
+    dbAgent?.systemPrompt ||
+    existingStoreAgent?.instructions ||
+    existingStoreAgent?.systemPrompt ||
+    liveCartesiaData?.llm_system_prompt ||
+    "";
 
   const liveGreeting =
-    liveCartesiaData?.llm_introduce !== undefined && liveCartesiaData.llm_introduce !== null
+    dbAgent?.initialMessage ||
+    existingStoreAgent?.initialMessage ||
+    (liveCartesiaData?.llm_introduce !== undefined && liveCartesiaData.llm_introduce !== null
       ? liveCartesiaData.llm_introduce
-      : (dbAgent?.initialMessage || existingStoreAgent?.initialMessage || "");
+      : "");
 
   const liveVoiceId =
     liveCartesiaData?.tts_voice ||

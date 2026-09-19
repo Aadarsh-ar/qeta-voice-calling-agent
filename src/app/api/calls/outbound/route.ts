@@ -203,6 +203,30 @@ export async function POST(req: Request) {
           console.warn("[OUTBOUND] Phone number agent PATCH warning:", patchErr);
         }
 
+        // PUSH SITE INSTRUCTIONS DIRECTLY TO CARTESIA:
+        // Ensure Cartesia executes the EXACT instructions set in our site database!
+        const sitePrompt = (agent.instructions || agent.systemPrompt || "").trim();
+        const siteGreeting = (agent.initialMessage || "").trim();
+        if (sitePrompt) {
+          try {
+            await fetch(`https://api.cartesia.ai/agents/${cartesiaAgentId}`, {
+              method: "PATCH",
+              headers: {
+                "X-API-Key": cartesiaApiKey,
+                "Cartesia-Version": "2025-04-16",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                llm_system_prompt: sitePrompt,
+                ...(siteGreeting ? { llm_introduce: siteGreeting } : {}),
+              }),
+            });
+            console.log(`[CARTESIA OUTBOUND] Synced site instructions to Cartesia agent ${cartesiaAgentId}`);
+          } catch (syncErr) {
+            console.warn("[CARTESIA OUTBOUND] Could not pre-sync site instructions:", syncErr);
+          }
+        }
+
         console.log(`[CARTESIA OUTBOUND] Dispatching call to ${cleanNumber} using agent ${cartesiaAgentId} from ${fromNumberId}`);
         const cartesiaCallRes = await fetch("https://api.cartesia.ai/agents/calls", {
           method: "POST",
