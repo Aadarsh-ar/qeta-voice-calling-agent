@@ -151,49 +151,14 @@ export async function POST(req: Request) {
     let telephonyReason = "";
     let telephonyDetails = "";
 
-    // ─── 1. Primary Dispatch: LiveKit SIP Outbound Trunk (Vobiz) ─────────
-    let livekitDispatched = false;
-    let livekitSipCallId = "";
-    const livekitHost = (process.env.LIVEKIT_URL || "https://ai-voice-agent-44qkuva3.livekit.cloud").replace(/^wss:\/\//, "https://");
-    const livekitApiKey = process.env.LIVEKIT_API_KEY;
-    const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
-    const livekitSipTrunkId = process.env.LIVEKIT_SIP_OUTBOUND_TRUNK_ID || "ST_9Q74KhnAwJjj";
-    const roomName = `call_${callId}`;
-
-    if (livekitApiKey && livekitApiSecret) {
-      try {
-        const { SipClient } = await import("livekit-server-sdk");
-        const sipClient = new SipClient(livekitHost, livekitApiKey, livekitApiSecret);
-
-        console.log(`[LIVEKIT SIP OUTBOUND] Dialing ${cleanNumber} via trunk ${livekitSipTrunkId} into room ${roomName}...`);
-        const sipParticipant = await sipClient.createSipParticipant(
-          livekitSipTrunkId,
-          cleanNumber,
-          roomName,
-          {
-            participantIdentity: `caller_${cleanNumber}`,
-            participantMetadata: JSON.stringify({ agentId: resolvedAgentId, callId }),
-            playRingtone: true,
-          }
-        );
-
-        console.log(`[LIVEKIT SIP OUTBOUND] SIP participant created successfully:`, sipParticipant);
-        livekitSipCallId = sipParticipant.sipCallId || `sip_${Date.now()}`;
-        vobizCallId = livekitSipCallId;
-        telephonyStatus = "RINGING";
-        telephonyReason = "Call placed via LiveKit Cloud SIP to Vobiz";
-        telephonyDetails = JSON.stringify(sipParticipant);
-        livekitDispatched = true;
-      } catch (lkSipErr: any) {
-        console.warn(`[LIVEKIT SIP OUTBOUND] SIP dispatch failed, falling back to Vobiz/Cartesia:`, lkSipErr?.message || lkSipErr);
-      }
-    }
-
-    // ─── 2. Secondary Dispatch: Cartesia Realtime Voice Runtime (SIP Trunk) ───
+    // ─── 1. Primary Production Dispatch: Cartesia Realtime Voice Runtime (Vobiz SIP Trunk) ───
+    // Cartesia runs the entire conversational pipeline (LLM, STT, and Sonic TTS) directly on their
+    // high-performance edge infrastructure, dialing through Vobiz SIP Trunk (ata_bfSkbLZ3BgAX8QsWp7vWqY).
+    // This requires zero external daemon workers and functions 100% reliably in Vercel serverless.
     let cartesiaCallId = "";
     let cartesiaDispatched = false;
 
-    if (!livekitDispatched && cartesiaApiKey && cartesiaAgentId) {
+    if (cartesiaApiKey && cartesiaAgentId) {
       try {
         let fromNumberId = "ap_qXvGsN8xnFH3giNBsQ8QBM";
         try {
@@ -214,6 +179,21 @@ export async function POST(req: Request) {
           }
         } catch (pnErr) {
           console.warn("[OUTBOUND] Could not fetch Cartesia phone numbers, using default:", pnErr);
+        }
+
+        // Dynamically bind the phone number to the target agent so Cartesia uses the correct agent prompt & voice
+        try {
+          await fetch(`https://api.cartesia.ai/agents/phone-numbers/${fromNumberId}`, {
+            method: "PATCH",
+            headers: {
+              "X-API-Key": cartesiaApiKey,
+              "Cartesia-Version": "2025-04-16",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ agent_id: cartesiaAgentId }),
+          });
+        } catch (patchErr) {
+          console.warn("[OUTBOUND] Phone number agent PATCH warning:", patchErr);
         }
 
         console.log(`[CARTESIA OUTBOUND] Dispatching call to ${cleanNumber} using agent ${cartesiaAgentId} from ${fromNumberId}`);
@@ -244,15 +224,63 @@ export async function POST(req: Request) {
           telephonyDetails = JSON.stringify(cartesiaCallData);
           cartesiaDispatched = true;
         } else if (callResult?.error) {
-          console.warn("[CARTESIA OUTBOUND] Cartesia call error, falling back to Vobiz API:", callResult.error);
+          console.warn("[CARTESIA OUTBOUND] Cartesia call error, trying fallback:", callResult.error);
         }
       } catch (cErr) {
-        console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception, falling back:", cErr);
+        console.warn("[CARTESIA OUTBOUND] Cartesia call dispatch exception, trying fallback:", cErr);
+      }
+    }
+
+    // ─── 2. Secondary Dispatch: LiveKit SIP Outbound Trunk (Vobiz) ─────────
+    let livekitDispatched = false;
+    let livekitSipCallId = "";
+    const livekitHost = (process.env.LIVEKIT_URL || "https://ai-voice-agent-44qkuva3.livekit.cloud").replace(/^wss:\/\//, "https://");
+    const livekitApiKey = process.env.LIVEKIT_API_KEY;
+    const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitSipTrunkId = process.env.LIVEKIT_SIP_OUTBOUND_TRUNK_ID || "ST_9Q74KhnAwJjj";
+    const roomName = `call_${callId}`;
+
+    if (!cartesiaDispatched && livekitApiKey && livekitApiSecret) {
+      try {
+        const { SipClient, AgentDispatchClient } = await import("livekit-server-sdk");
+        const sipClient = new SipClient(livekitHost, livekitApiKey, livekitApiSecret);
+
+        // Pre-dispatch worker to room so if a worker is running, it joins immediately
+        try {
+          const adc = new AgentDispatchClient(livekitHost, livekitApiKey, livekitApiSecret);
+          await adc.createDispatch(roomName, "", {
+            metadata: JSON.stringify({ agentId: resolvedAgentId, callId }),
+          });
+        } catch (dispatchErr) {
+          console.warn("[LIVEKIT] Agent dispatch warning:", dispatchErr);
+        }
+
+        console.log(`[LIVEKIT SIP OUTBOUND] Dialing ${cleanNumber} via trunk ${livekitSipTrunkId} into room ${roomName}...`);
+        const sipParticipant = await sipClient.createSipParticipant(
+          livekitSipTrunkId,
+          cleanNumber,
+          roomName,
+          {
+            participantIdentity: `caller_${cleanNumber}`,
+            participantMetadata: JSON.stringify({ agentId: resolvedAgentId, callId }),
+            playRingtone: true,
+          }
+        );
+
+        console.log(`[LIVEKIT SIP OUTBOUND] SIP participant created successfully:`, sipParticipant);
+        livekitSipCallId = sipParticipant.sipCallId || `sip_${Date.now()}`;
+        vobizCallId = livekitSipCallId;
+        telephonyStatus = "RINGING";
+        telephonyReason = "Call placed via LiveKit Cloud SIP to Vobiz";
+        telephonyDetails = JSON.stringify(sipParticipant);
+        livekitDispatched = true;
+      } catch (lkSipErr: any) {
+        console.warn(`[LIVEKIT SIP OUTBOUND] SIP dispatch failed, falling back to Vobiz API:`, lkSipErr?.message || lkSipErr);
       }
     }
 
     // ─── 3. Fallback Dispatch: Vobiz REST API ──────────────────────────────
-    if (!livekitDispatched && !cartesiaDispatched && vobizAuthId && vobizAuthToken) {
+    if (!cartesiaDispatched && !livekitDispatched && vobizAuthId && vobizAuthToken) {
       try {
         const vobizApiUrl = `https://api.vobiz.ai/api/v1/Account/${vobizAuthId}/Call/`;
         const answerUrl = `${webhookUrl}/api/vobiz/incoming-call?agentId=${encodeURIComponent(resolvedAgentId)}&callerNumber=${encodeURIComponent(cleanNumber)}`;

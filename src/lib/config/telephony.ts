@@ -24,7 +24,7 @@ export const DEFAULT_TELEPHONY_CONFIG = {
   sarvamModel: "saaras:v3-realtime",
   groqApiKey: ["g", "s", "k", "_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join(""),
   groqModel: "qwen/qwen3.8-27b",
-  defaultPublicBaseUrl: "https://voice.qeta.in",
+  defaultPublicBaseUrl: "https://qeta.in",
 };
 
 /**
@@ -33,7 +33,8 @@ export const DEFAULT_TELEPHONY_CONFIG = {
 export function getEnvVar(key: string, fallback = ""): string {
   // 1. Process environment (Docker, Vercel, Node runtime)
   if (process.env[key] && process.env[key]!.trim().length > 0) {
-    return process.env[key]!.trim();
+    const raw = process.env[key]!.replace(/^["']|["']$/g, "").trim();
+    if (raw.length > 0) return raw;
   }
 
   // 2. Disk scan for .env.local or .env (if accessible in server runtime)

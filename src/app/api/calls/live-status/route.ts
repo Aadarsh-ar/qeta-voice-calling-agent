@@ -62,32 +62,102 @@ export async function GET(req: Request) {
       });
     }
 
-    // Compute elapsed duration
-    const startTime = call.startedAt ? new Date(call.startedAt).getTime() : Date.now();
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
-    const durationSeconds = call.durationSeconds > 0 ? call.durationSeconds : elapsedSeconds;
+    // 3. For Cartesia Realtime Agent calls (vobizCallId starts with "ac_"), query Cartesia edge directly
+    const cartesiaCallId = call.vobizCallId?.startsWith("ac_") ? call.vobizCallId : null;
+    let cartesiaData: any = null;
 
-    const isActive = call.status === CallStatus.ACTIVE || call.status === CallStatus.INITIALIZING;
-
-    let stage = call.stage || "RINGING";
-    if (isActive) {
-      if (elapsedSeconds < 2) {
-        stage = "MEDIA_CONNECTING";
-      } else if (elapsedSeconds < 6) {
-        stage = "AGENT_SPEAKING";
-      } else if (elapsedSeconds % 8 < 4) {
-        stage = "LISTENING";
-      } else {
-        stage = "AGENT_SPEAKING";
+    if (cartesiaCallId) {
+      try {
+        const { getTelephonyConfig } = await import("@/lib/config/telephony");
+        const { cartesiaApiKey } = getTelephonyConfig();
+        if (cartesiaApiKey) {
+          const cRes = await fetch(`https://api.cartesia.ai/agents/calls/${cartesiaCallId}`, {
+            headers: {
+              "X-API-Key": cartesiaApiKey,
+              "Cartesia-Version": "2025-04-16",
+            },
+          });
+          if (cRes.ok) {
+            cartesiaData = await cRes.json();
+          }
+        }
+      } catch (cErr) {
+        console.warn("[LIVE_STATUS] Cartesia status poll warning:", cErr);
       }
-    } else {
-      stage = "ENDED";
     }
 
-    const lastTranscript =
+    // Compute elapsed duration
+    const startTime = call.startedAt ? new Date(call.startedAt).getTime() : Date.now();
+    let elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+
+    let isActive = call.status === CallStatus.ACTIVE || call.status === CallStatus.INITIALIZING;
+    let stage = call.stage || "RINGING";
+    let lastTranscript =
       call.transcripts && call.transcripts.length > 0
         ? call.transcripts[call.transcripts.length - 1].content
         : "నమస్కారం అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను.";
+
+    if (cartesiaData) {
+      const cStatus = cartesiaData.status; // "ringing" | "in_progress" | "completed" | "failed"
+      if (cStatus === "ringing") {
+        stage = "RINGING";
+        isActive = true;
+      } else if (cStatus === "in_progress") {
+        stage = "AGENT_SPEAKING";
+        isActive = true;
+        if (cartesiaData.start_time) {
+          const cStart = new Date(cartesiaData.start_time).getTime();
+          elapsedSeconds = Math.max(0, Math.floor((Date.now() - cStart) / 1000));
+        }
+      } else if (cStatus === "completed" || cStatus === "failed") {
+        stage = "ENDED";
+        isActive = false;
+        if (cartesiaData.start_time && cartesiaData.end_time) {
+          const cStart = new Date(cartesiaData.start_time).getTime();
+          const cEnd = new Date(cartesiaData.end_time).getTime();
+          elapsedSeconds = Math.max(1, Math.round((cEnd - cStart) / 1000));
+        }
+        if (cartesiaData.summary) {
+          lastTranscript = cartesiaData.summary;
+        }
+
+        // Persist completed duration in Neon PostgreSQL if call completed
+        if (call.status !== CallStatus.COMPLETED) {
+          call.status = CallStatus.COMPLETED;
+          call.durationSeconds = elapsedSeconds;
+          try {
+            const { prisma } = await import("@/lib/db/prisma");
+            await prisma.call.updateMany({
+              where: {
+                OR: [{ id: call.id }, { vobizCallId: cartesiaCallId }],
+              },
+              data: {
+                status: CallStatus.COMPLETED,
+                durationSeconds: elapsedSeconds,
+                endedAt: cartesiaData.end_time ? new Date(cartesiaData.end_time) : new Date(),
+                endReason: cartesiaData.end_reason || cartesiaData.error_message || "CALL_COMPLETED",
+              },
+            });
+          } catch {}
+        }
+      }
+    } else {
+      if (isActive) {
+        if (elapsedSeconds < 2) {
+          stage = "MEDIA_CONNECTING";
+        } else if (elapsedSeconds < 6) {
+          stage = "AGENT_SPEAKING";
+        } else if (elapsedSeconds % 8 < 4) {
+          stage = "LISTENING";
+        } else {
+          stage = "AGENT_SPEAKING";
+        }
+      } else {
+        stage = "ENDED";
+      }
+    }
+
+    const durationSeconds = call.durationSeconds > 0 ? call.durationSeconds : elapsedSeconds;
 
     return NextResponse.json({
       success: true,

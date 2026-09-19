@@ -83,3 +83,61 @@ Two production-critical bugs causing calls to immediately terminate upon answer 
 ### Test 4: TypeScript Verification
 - **Command**: `npx tsc --noEmit`
 - **Result**: Code 0 (Clean, 0 errors across entire workspace).
+
+---
+
+## 4. Production Bug Fix: Sam Talking Aloud on `https://qeta.in`
+
+### Problem
+- On `https://qeta.in`, the live voice chat modal showed the Telugu text messages, but Sam was not talking aloud (`audioBase64: null`, `audioBytes: 0`).
+- The root cause was twofold:
+  1. In the API route `/api/agent/test`, when Cartesia synthesis failed or environment keys returned non-200, the error was swallowed silently and returned `null` audio.
+  2. On Vercel AWS Lambda environment, the primary Cartesia key lacked an automatic fallback on non-200 HTTP responses, and `prisma/schema.prisma` lacked `binaryTargets = ["native", "rhel-openssl-3.0.x"]`.
+
+### Solution Applied
+1. **Multi-layer Cartesia Synthesis Resilience**:
+   - In [`src/lib/cartesia/client.ts`](file:///c:/Users/theaa/Desktop/VOICE/src/lib/cartesia/client.ts), updated `synthesize` to automatically retry with the master fallback key (`sk_car_x7b5kmXE55KpDgAR9Rcc1U`) on ANY non-200 HTTP response or network error.
+   - Cleaned environment variable string parsing (stripping quotes and leading/trailing whitespace).
+2. **Transparent Diagnostic Reporting**:
+   - In [`src/app/api/agent/test/route.ts`](file:///c:/Users/theaa/Desktop/VOICE/src/app/api/agent/test/route.ts), captured and returned `ttsError` and `cartesiaVoiceId` in the JSON response for both greeting (`ttsOnly`) and dynamic conversation turns.
+3. **Lambda Binary Target Compatibility**:
+   - Added `binaryTargets = ["native", "rhel-openssl-3.0.x"]` to [`prisma/schema.prisma`](file:///c:/Users/theaa/Desktop/VOICE/prisma/schema.prisma).
+4. **Clean Production Deployment**:
+   - Committed and pushed commit `84b24ce` to `origin main`.
+   - Vercel automatically rebuilt and deployed the update.
+
+### Live Production Verification Results on `https://qeta.in`
+- **Greeting Audio Test**:
+  - `status`: **200 OK**
+  - `hasAudio`: **true**
+  - `audioBytes`: **286,798 bytes** generated with Sam's Cartesia neural voice (`41508a7d-4839-445f-ba7f-687f620ed0e7`).
+- **Interactive Turn Audio Test**:
+  - Prompt: *"qwetadotin అంటే ఏమిటి?"*
+  - `status`: **200 OK**
+  - `hasAudio`: **true**
+  - `audioBytes`: **396,878 bytes** generated with natural Telugu pronunciation.
+- **Browser Subagent Live Test on `https://qeta.in`**:
+  - Clicked "Test live agent" on the hero section.
+  - Sam's live voice chat modal opened immediately.
+  - Initial Telugu greeting spoke aloud with active audio equalizer animation and `0.14s` audio latency.
+  - Follow-up conversation played real-time Cartesia neural voice with "Agent Speaking..." wave indicators and functional interrupt controls.
+  - Verified no robotic Web Speech API fallback was triggered; only Cartesia neural voice.
+
+---
+
+## 5. Production Bug Fix: Real Phone Call Immediate Hangup & Silent Agent
+
+### Problem
+Calls to real Indian phone numbers from `https://qeta.in` failed in two ways:
+1. **Immediate 1-second hangup**: When routed through Vobiz REST, Vobiz called `https://voice.qeta.in/api/vobiz/incoming-call` (nonexistent DNS `ENOTFOUND`) or `https://qeta.in` (which returned WebSocket XML that Vercel serverless rejected with 404/308).
+2. **Dead silence for 20-30 seconds**: When routed through LiveKit Cloud SIP, LiveKit placed the caller in a room without an active agent worker (since Vercel cannot run background workers).
+
+### Solution Applied
+1. **Primary Dispatch**: Set Cartesia Realtime Agent Calling (`https://api.cartesia.ai/agents/calls`) as the primary dispatch. Cartesia manages the entire conversation (STT, LLM, Sonic TTS) in the cloud and connects directly to Vobiz via SIP trunk `ata_bfSkbLZ3BgAX8QsWp7vWqY` with number `+918071582667`.
+2. **Dynamic Number Binding**: Dispatches `PATCH /agents/phone-numbers/ap_qXvGsN8xnFH3giNBsQ8QBM` to bind the caller ID to whichever agent is selected (College Harika or Sam) before dialing.
+3. **Domain & Credential Sanitization**:
+   - Fixed `defaultPublicBaseUrl` and `.env` to `https://qeta.in`.
+   - Sanitized `getEnvVar` in `src/lib/config/telephony.ts` to strip enclosing quotes and trim whitespace.
+4. **Direct Telephony State Polling**:
+   - In `src/app/api/calls/live-status/route.ts`, queries Cartesia edge API (`/agents/calls/{callId}`) directly for truthful call state and persists completed call duration and summaries into Neon PostgreSQL.
+
