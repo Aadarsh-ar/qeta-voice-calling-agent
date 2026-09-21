@@ -344,10 +344,10 @@ export default function HomePage() {
             </Link>
 
             <Link
-              href="/dashboard"
+              href="/login"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-full border border-emerald-400/50 text-white font-semibold text-sm sm:text-base hover:bg-emerald-800/60 transition"
             >
-              <span>Explore Interactive Console</span>
+              <span>Sign in to Console</span>
             </Link>
           </div>
         </div>
@@ -362,11 +362,8 @@ export default function HomePage() {
             <Link href="/pricing" className="hover:text-emerald-800 transition">
               Pricing
             </Link>
-            <Link href="/dashboard" className="hover:text-emerald-800 transition">
-              Console
-            </Link>
-            <Link href="/settings" className="hover:text-emerald-800 transition">
-              Settings
+            <Link href="/login" className="hover:text-emerald-800 transition">
+              Sign in
             </Link>
           </div>
 

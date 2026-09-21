@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ArrowRight, Menu, X, PhoneCall, Bot } from "lucide-react";
+import { ArrowRight, Menu, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { unlockAudio } from "@/lib/audio/unlock";
 
@@ -12,7 +12,6 @@ interface LandingHeaderProps {
 
 export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [resourcesOpen, setResourcesOpen] = useState(false);
 
   const handleTestAgentClick = () => {
     unlockAudio();
@@ -45,42 +44,6 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
           >
             Pricing
           </Link>
-
-          {/* Resources Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => setResourcesOpen(true)}
-            onMouseLeave={() => setResourcesOpen(false)}
-          >
-            <button
-              onClick={() => setResourcesOpen(!resourcesOpen)}
-              className="inline-flex items-center gap-1 hover:text-emerald-800 transition-colors py-1"
-            >
-              <span>Resources</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${resourcesOpen ? "rotate-180" : ""}`} />
-            </button>
-
-            {resourcesOpen && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 pt-2 w-56 animate-in fade-in slide-in-from-top-1 duration-150">
-                <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-xl flex flex-col gap-1">
-                  <Link
-                    href="/dashboard"
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition flex items-center gap-2"
-                  >
-                    <Bot className="w-3.5 h-3.5 text-emerald-600" />
-                    Interactive Console
-                  </Link>
-                  <Link
-                    href="/phone-numbers"
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition flex items-center gap-2"
-                  >
-                    <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
-                    Carrier Trunking Status
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
         </nav>
 
         {/* Right: Actions */}
@@ -144,13 +107,6 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
               className="py-1 hover:text-emerald-800 transition"
             >
               Pricing
-            </Link>
-            <Link
-              href="/dashboard"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1 hover:text-emerald-800 transition"
-            >
-              Console
             </Link>
           </nav>
 

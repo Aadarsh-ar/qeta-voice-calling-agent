@@ -209,7 +209,7 @@ export default function PricingPage() {
             </div>
 
             <Link
-              href="/dashboard"
+              href="/login"
               className="btn-emerald-secondary text-xs px-5 py-2.5 shrink-0"
             >
               View Rate Card
