@@ -18,12 +18,14 @@ const PROTECTED_PREFIXES = [
   "/employees",
   "/training",
   "/calling",
+  "/campaigns",
+  "/templates",
 ];
 
 // Public API routes and internals
 const PUBLIC_PREFIXES = ["/api/auth", "/api/vobiz", "/_next", "/favicon", "/api/"];
 // Public pages
-const PUBLIC_EXACT = ["/", "/login", "/signup", "/pricing", "/templates"];
+const PUBLIC_EXACT = ["/", "/login", "/signup", "/pricing"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

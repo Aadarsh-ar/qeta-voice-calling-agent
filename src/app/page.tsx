@@ -359,9 +359,6 @@ export default function HomePage() {
           <Logo href="/" size="sm" />
 
           <div className="flex items-center gap-6 font-medium text-slate-600">
-            <Link href="/templates" className="hover:text-emerald-800 transition">
-              Templates
-            </Link>
             <Link href="/pricing" className="hover:text-emerald-800 transition">
               Pricing
             </Link>

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ArrowRight, Menu, X, PhoneCall, Bot, Sparkles } from "lucide-react";
+import { ChevronDown, ArrowRight, Menu, X, PhoneCall, Bot } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { unlockAudio } from "@/lib/audio/unlock";
 
@@ -34,25 +34,10 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
             Product
           </Link>
           <Link
-            href="/campaigns"
-            className="hover:text-emerald-800 transition-colors py-1 flex items-center gap-1.5"
-          >
-            <span>Campaigns</span>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300/60">
-              New
-            </span>
-          </Link>
-          <Link
             href="#solutions"
             className="hover:text-emerald-800 transition-colors py-1"
           >
             Solutions
-          </Link>
-          <Link
-            href="/templates"
-            className="hover:text-emerald-800 transition-colors py-1"
-          >
-            Templates
           </Link>
           <Link
             href="/pricing"
@@ -84,13 +69,6 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
                   >
                     <Bot className="w-3.5 h-3.5 text-emerald-600" />
                     Interactive Console
-                  </Link>
-                  <Link
-                    href="/templates"
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition flex items-center gap-2"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    Agent Templates
                   </Link>
                   <Link
                     href="/phone-numbers"
@@ -154,28 +132,11 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
               Product
             </Link>
             <Link
-              href="/campaigns"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1 hover:text-emerald-800 transition flex items-center justify-between"
-            >
-              <span>Campaigns</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                New
-              </span>
-            </Link>
-            <Link
               href="#solutions"
               onClick={() => setMobileMenuOpen(false)}
               className="py-1 hover:text-emerald-800 transition"
             >
               Solutions
-            </Link>
-            <Link
-              href="/templates"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1 hover:text-emerald-800 transition"
-            >
-              Templates
             </Link>
             <Link
               href="/pricing"
