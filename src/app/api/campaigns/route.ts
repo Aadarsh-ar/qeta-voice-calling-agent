@@ -3,7 +3,17 @@ import { campaignManager } from "@/lib/campaigns/campaignManager";
 
 export async function GET() {
   try {
-    const campaigns = campaignManager.getCampaigns();
+    const rawCampaigns = campaignManager.getCampaigns();
+    // Memory and payload optimization for 1K+ contacts:
+    // Strip heavy transcripts from list view so polling is instant
+    const campaigns = rawCampaigns.map((c) => ({
+      ...c,
+      contacts: c.contacts.slice(0, 10).map((cnt) => ({
+        ...cnt,
+        transcripts: undefined,
+      })),
+      totalContactsCount: c.contacts.length,
+    }));
     return NextResponse.json({ success: true, campaigns });
   } catch (err: any) {
     return NextResponse.json(

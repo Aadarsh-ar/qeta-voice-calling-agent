@@ -5,14 +5,16 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  console.log("[CONTROL_ROUTE_CALLED] Entering control route...");
   try {
     const { id } = await params;
+    console.log("[CONTROL_ROUTE_CALLED] id:", id);
     const body = await req.json();
     const { action } = body;
 
-    if (!action || !["start", "pause", "resume", "stop"].includes(action)) {
+    if (!action || !["start", "pause", "resume", "stop", "restart"].includes(action)) {
       return NextResponse.json(
-        { success: false, error: "Action must be one of: start, pause, resume, stop" },
+        { success: false, error: "Action must be one of: start, pause, resume, stop, restart" },
         { status: 400 }
       );
     }
@@ -25,6 +27,9 @@ export async function POST(
     switch (action) {
       case "start":
         result = campaignManager.startCampaign(id);
+        break;
+      case "restart":
+        result = campaignManager.restartCampaign(id);
         break;
       case "pause":
         result = campaignManager.pauseCampaign(id);

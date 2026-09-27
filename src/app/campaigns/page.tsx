@@ -23,6 +23,7 @@ import {
   Sparkles,
   PhoneForwarded,
   Square,
+  Download,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Campaign } from "@/lib/campaigns/types";
@@ -54,7 +55,7 @@ export default function CampaignsListPage() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleControl = async (id: string, action: "start" | "pause" | "resume" | "stop", e: React.MouseEvent) => {
+  const handleControl = async (id: string, action: "start" | "pause" | "resume" | "stop" | "restart", e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setActionLoading(`${id}_${action}`);
@@ -176,6 +177,41 @@ export default function CampaignsListPage() {
           </div>
         </div>
 
+        {/* Real Numbers Test Campaign Banner */}
+        <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-4 sm:p-5 border border-emerald-700/40 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                LIVE TELEPHONY TEST
+              </span>
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-1.5">
+                <span>Real Numbers Test Campaign (+91 6305367443)</span>
+              </h2>
+            </div>
+            <p className="text-xs text-slate-300">
+              Test end-to-end autonomous voice calling with verified real numbers including <span className="text-emerald-300 font-semibold">+91 6305367443</span> via Vobiz SIP Trunk &amp; Harika Telugu/English AI agent.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+            <a
+              href="/example_campaign_contacts.csv"
+              download="example_campaign_contacts.csv"
+              className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition flex items-center justify-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Example Sheet (.csv)</span>
+            </a>
+            <Link
+              href="/campaigns/CMP-TEST-6305367443"
+              className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Open Test Campaign</span>
+            </Link>
+          </div>
+        </div>
+
         {/* Search, Filter & Quick Action Bar */}
         <div className="bg-white rounded-2xl border border-[#E8EAE6] p-3 sm:p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -292,7 +328,7 @@ export default function CampaignsListPage() {
                       )}
 
                       <div className="flex items-center gap-4 text-[11px] text-slate-500 pt-1">
-                        <span>Concurrency: <strong className="text-slate-700">{camp.concurrency} calls</strong></span>
+                        <span>Calling: <strong className="text-slate-700">{camp.concurrency === 1 ? "1-by-1 Sequential" : `${camp.concurrency} concurrent`}</strong></span>
                         <span>•</span>
                         <span>Max Retries: <strong className="text-slate-700">{camp.maxRetries}</strong></span>
                         <span>•</span>
@@ -345,7 +381,7 @@ export default function CampaignsListPage() {
                           className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1.5 transition shadow-xs"
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>Start</span>
+                          <span>Start (1-by-1)</span>
                         </button>
                       )}
 
@@ -370,6 +406,18 @@ export default function CampaignsListPage() {
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
                           <span>Resume</span>
+                        </button>
+                      )}
+
+                      {(camp.status === "COMPLETED" || camp.status === "STOPPED") && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleControl(camp.id, "restart", e)}
+                          disabled={actionLoading === `${camp.id}_restart`}
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 transition shadow-xs"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Re-run</span>
                         </button>
                       )}
 

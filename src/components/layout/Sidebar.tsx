@@ -49,7 +49,7 @@ export function Sidebar() {
       title: "Workspace",
       items: [
         { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { label: "Campaigns", href: "/campaigns", icon: Megaphone, badge: "New" },
+        { label: "Voice Campaigns", href: "/campaigns", icon: Megaphone, badge: "Live" },
         { label: "Voice Agents", href: "/agents", icon: Bot },
         { label: "Call History", href: "/calls", icon: PhoneCall },
         { label: "Templates", href: "/templates", icon: Layers },

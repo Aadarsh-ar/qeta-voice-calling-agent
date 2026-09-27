@@ -377,8 +377,8 @@ async function getLLMResponse(systemPrompt, history, userText) {
         body: JSON.stringify({
           model,
           messages,
-          temperature: 0.3,
-          max_tokens: 350,
+          temperature: 0.2,
+          max_tokens: 75,
         }),
       },
       { timeoutMs: 14000, maxRetries: 2, retryOn5xx: true }
@@ -440,7 +440,7 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
   // Load essential agent identity directly without multi-hop HTTP
   let agentName = "Voice Agent";
   let businessName = "";
-  let voiceId = process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
+  let voiceId = process.env.CARTESIA_VOICE_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7";
   let language = "TELUGU_ENGLISH";
   let systemPrompt = "";
   let initialMessage = "";
@@ -529,15 +529,15 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
 function getActiveAgent() {
   return {
     name: "Voice Assistant",
-    voiceId: process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceId: process.env.CARTESIA_VOICE_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7",
     systemPrompt: `# IDENTITY & ROLE
 You are a professional and friendly AI voice assistant.
 You are on a LIVE, REAL-TIME PHONE CALL with a customer.
 
-# RULES
-1. Keep response between 1 to 2 sentences. Maximum 20 words.
-2. Speak in natural everyday Telugu / Tenglish.
-3. Polite words: "అవునండి", "ఖచ్చితంగా అండి", "ధన్యవాదాలు అండి".
+# RULES (EXTREME LOW LATENCY - 40% SPEEDUP)
+1. Keep response strictly to 1 short sentence. Maximum 10-12 words.
+2. Start instantly with an acknowledgment word ("అవునండి", "సరేనండి", "అలాగే అండి", "Sure").
+3. Speak in natural everyday Telugu / Tenglish.
 4. Ask only ONE question at a time.
 5. Opening greeting: "హాయ్ అండి, నేను మీ వాయిస్ అసిస్టెంట్. మీకు ఎలా సహాయం చేయగలను?"`,
   };
@@ -1589,9 +1589,9 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
 
         consecutiveSpeechFrames = 0;
 
-        // Rolling pre-speech buffer (keep 25 frames = 500ms to preserve soft initial syllables)
+        // Rolling pre-speech buffer (keep 14 frames = 280ms to preserve soft initial syllables with 45% faster upload)
         preSpeechBuffer.push(chunk);
-        if (preSpeechBuffer.length > 25) preSpeechBuffer.shift();
+        if (preSpeechBuffer.length > 14) preSpeechBuffer.shift();
 
         // Sensitive PSTN voice threshold: 420 RMS captures quiet & normal speech without clipping
         if (rms >= 420) {
@@ -1607,9 +1607,9 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
           // Low energy frame after speaking
           speechAudioChunks.push(chunk);
           const silenceDuration = Date.now() - lastSpeechTime;
-          // Natural conversational pause: 800ms ensures caller finished their full sentence
-          if (silenceDuration >= 800 || speechAudioChunks.length > 500) {
-            console.log(`[CALLER_SPEECH_END] Turn complete (${(speechAudioChunks.length * 20 / 1000).toFixed(1)}s audio, silence=${silenceDuration}ms)`);
+          // 40% Faster Conversational Turn Detection: 480ms (down from 800ms) for snappy, human-like turn-taking
+          if (silenceDuration >= 480 || speechAudioChunks.length > 400) {
+            console.log(`[CALLER_SPEECH_END] Turn complete (${(speechAudioChunks.length * 20 / 1000).toFixed(1)}s audio, silence=${silenceDuration}ms, fastTurn=true)`);
             callerIsSpeaking = false;
             const turnAudio = Buffer.concat(speechAudioChunks);
             speechAudioChunks = [];

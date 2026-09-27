@@ -118,18 +118,14 @@ export async function POST(req: Request) {
       dataStore.createAgentWithId(agent);
     }
 
+    // Dynamic resolution of Cartesia Agent ID
     const cartesiaApiKey = telConfig.cartesiaApiKey;
     let cartesiaAgentId =
-      agent.cartesiaAgentId && agent.cartesiaAgentId.startsWith("agent_")
+      (agent.cartesiaAgentId && agent.cartesiaAgentId.startsWith("agent_")
         ? agent.cartesiaAgentId
-        : telConfig.cartesiaAgentId;
-
-    // Guaranteed valid agents on the active, paid Cartesia account (ata_bfSkbLZ3BgAX8QsWp7vWqY)
-    const validCartesiaAgents = ["agent_vDCfnuFdJokXJDVxgmHeZx", "agent_WzcEn6kkRmPxAfBNHzvpa1"];
-    if (!cartesiaAgentId || !validCartesiaAgents.includes(cartesiaAgentId)) {
-      console.warn(`[OUTBOUND] Agent ID ${cartesiaAgentId} is not in paid Cartesia account, remapping to verified agent_vDCfnuFdJokXJDVxgmHeZx`);
-      cartesiaAgentId = "agent_vDCfnuFdJokXJDVxgmHeZx";
-    }
+        : agent.id && agent.id.startsWith("agent_")
+        ? agent.id
+        : telConfig.cartesiaAgentId) || "agent_vDCfnuFdJokXJDVxgmHeZx";
 
     const resolvedAgentId = agent.id;
     const agentName = agent.name;
@@ -159,9 +155,6 @@ export async function POST(req: Request) {
     let telephonyDetails = "";
 
     // ─── 1. Primary Production Dispatch: Cartesia Realtime Voice Runtime (Vobiz SIP Trunk) ───
-    // Cartesia runs the entire conversational pipeline (LLM, STT, and Sonic TTS) directly on their
-    // high-performance edge infrastructure, dialing through Vobiz SIP Trunk (ata_bfSkbLZ3BgAX8QsWp7vWqY).
-    // This requires zero external daemon workers and functions 100% reliably in Vercel serverless.
     let cartesiaCallId = "";
     let cartesiaDispatched = false;
 
@@ -186,45 +179,6 @@ export async function POST(req: Request) {
           }
         } catch (pnErr) {
           console.warn("[OUTBOUND] Could not fetch Cartesia phone numbers, using default:", pnErr);
-        }
-
-        // Dynamically bind the phone number to the target agent so Cartesia uses the correct agent prompt & voice
-        try {
-          await fetch(`https://api.cartesia.ai/agents/phone-numbers/${fromNumberId}`, {
-            method: "PATCH",
-            headers: {
-              "X-API-Key": cartesiaApiKey,
-              "Cartesia-Version": "2025-04-16",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ agent_id: cartesiaAgentId }),
-          });
-        } catch (patchErr) {
-          console.warn("[OUTBOUND] Phone number agent PATCH warning:", patchErr);
-        }
-
-        // PUSH SITE INSTRUCTIONS DIRECTLY TO CARTESIA:
-        // Ensure Cartesia executes the EXACT instructions set in our site database!
-        const sitePrompt = (agent.instructions || agent.systemPrompt || "").trim();
-        const siteGreeting = (agent.initialMessage || "").trim();
-        if (sitePrompt) {
-          try {
-            await fetch(`https://api.cartesia.ai/agents/${cartesiaAgentId}`, {
-              method: "PATCH",
-              headers: {
-                "X-API-Key": cartesiaApiKey,
-                "Cartesia-Version": "2025-04-16",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                llm_system_prompt: sitePrompt,
-                ...(siteGreeting ? { llm_introduce: siteGreeting } : {}),
-              }),
-            });
-            console.log(`[CARTESIA OUTBOUND] Synced site instructions to Cartesia agent ${cartesiaAgentId}`);
-          } catch (syncErr) {
-            console.warn("[CARTESIA OUTBOUND] Could not pre-sync site instructions:", syncErr);
-          }
         }
 
         console.log(`[CARTESIA OUTBOUND] Dispatching call to ${cleanNumber} using agent ${cartesiaAgentId} from ${fromNumberId}`);
@@ -265,8 +219,8 @@ export async function POST(req: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from_number_id: "ap_qXvGsN8xnFH3giNBsQ8QBM",
-              agent_id: "agent_vDCfnuFdJokXJDVxgmHeZx",
+              from_number_id: fromNumberId,
+              agent_id: cartesiaAgentId,
               ringing_timeout_seconds: 30,
               outbound_calls: [{ to_number: cleanNumber }],
             }),

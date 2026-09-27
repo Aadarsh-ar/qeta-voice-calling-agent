@@ -46,6 +46,8 @@ export default function CampaignDashboardPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [selectedContact, setSelectedContact] = useState<CampaignContact | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   // Poll campaign state every 1.5 seconds for live progress
   const fetchCampaign = async () => {
@@ -73,8 +75,8 @@ export default function CampaignDashboardPage({
     return () => clearInterval(interval);
   }, [campaignId]);
 
-  // Campaign control actions (Start, Pause, Resume, Stop)
-  const handleControl = async (action: "start" | "pause" | "resume" | "stop") => {
+  // Campaign control actions (Start, Pause, Resume, Stop, Restart)
+  const handleControl = async (action: "start" | "pause" | "resume" | "stop" | "restart") => {
     setActionLoading(action);
     try {
       const res = await fetch(`/api/campaigns/${campaignId}/control`, {
@@ -142,6 +144,16 @@ export default function CampaignDashboardPage({
     (c) => c.status === "DIALING" || c.status === "CONNECTED" || c.status === "QUEUED"
   ).length;
 
+  // Active contact currently on the line (for 1-by-1 sequential calling monitor)
+  const activeContact = campaign.contacts.find(
+    (c) => c.status === "CONNECTED" || c.status === "DIALING" || c.status === "QUEUED"
+  );
+  const nextContact = campaign.contacts.find((c) => c.status === "PENDING");
+  const completedCount = campaign.contacts.filter((c) => c.status === "COMPLETED").length;
+  const currentContactIndex = activeContact
+    ? campaign.contacts.findIndex((c) => c.id === activeContact.id) + 1
+    : completedCount;
+
   const filteredContacts = campaign.contacts.filter((c) => {
     let matchesStatus = true;
     if (statusFilter === "IN_PROGRESS") {
@@ -166,11 +178,14 @@ export default function CampaignDashboardPage({
     return matchesStatus && matchesSearch;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredContacts.length / pageSize));
+  const paginatedContacts = filteredContacts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div className="flex-1 flex flex-col bg-[#FAFAF8] min-h-screen text-slate-900 selection:bg-emerald-100 selection:text-emerald-900">
       <Header
         title={campaign.name}
-        subtitle={`AI Agent: ${campaign.agentName || "Harika"} • ${campaign.concurrency} concurrent channels`}
+        subtitle={`AI Voice Outreach • ${campaign.concurrency === 1 ? "1-by-1 Sequential Dialing" : `${campaign.concurrency} concurrent channels`} • Agent: ${campaign.agentName || "Harika"}`}
       >
         <div className="flex items-center gap-2">
           <Link
@@ -210,37 +225,37 @@ export default function CampaignDashboardPage({
                 <span>{campaign.agentName}</span>
               </span>
 
-              <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                <Sliders className="w-3.5 h-3.5 text-slate-500" />
-                <span>Concurrency: {campaign.concurrency}</span>
+              <span className="text-xs font-semibold text-slate-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <Radio className="w-3 h-3 text-emerald-600" />
+                <span>One-by-One Calling</span>
               </span>
 
               {inFlightCount > 0 && (
                 <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
-                  <Radio className="w-3 h-3 text-emerald-600" />
-                  <span>{inFlightCount} In-Flight Calls</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+                  <span>Call #{currentContactIndex} of {campaign.contacts.length} Active</span>
                 </span>
               )}
             </div>
 
             <p className="text-xs text-slate-500 pt-1">
-              Max Retries: <strong className="text-slate-700">{campaign.maxRetries}</strong> • Retry Delay:{" "}
-              <strong className="text-slate-700">{campaign.retryDelaySeconds}s</strong> • Pacing:{" "}
-              <strong className="text-slate-700">{campaign.callDelaySeconds}s between calls</strong>
+              Pacing: <strong className="text-slate-700">{campaign.callDelaySeconds}s between calls</strong> • Max Retries:{" "}
+              <strong className="text-slate-700">{campaign.maxRetries}</strong> • Retry Delay:{" "}
+              <strong className="text-slate-700">{campaign.retryDelaySeconds}s</strong>
             </p>
           </div>
 
-          {/* Controls Toolbar: Start, Pause, Resume, Stop */}
+          {/* Controls Toolbar: Start, Pause, Resume, Stop, Re-run */}
           <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
             {campaign.status === "DRAFT" && (
               <button
                 type="button"
                 onClick={() => handleControl("start")}
                 disabled={actionLoading === "start"}
-                className="btn-emerald-primary text-xs px-4 py-2.5 flex items-center gap-2 shadow-sm flex-1 sm:flex-initial justify-center"
+                className="btn-emerald-primary text-xs px-5 py-2.5 flex items-center gap-2 shadow-sm flex-1 sm:flex-initial justify-center transition transform hover:-translate-y-0.5"
               >
                 <Play className="w-4 h-4 fill-current" />
-                <span>Start Campaign</span>
+                <span>Start Campaign (One by One)</span>
               </button>
             )}
 
@@ -263,7 +278,7 @@ export default function CampaignDashboardPage({
                   className="px-4 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-2 transition shadow-sm flex-1 sm:flex-initial justify-center"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>Stop Campaign</span>
+                  <span>Stop</span>
                 </button>
               </>
             )}
@@ -292,26 +307,122 @@ export default function CampaignDashboardPage({
               </>
             )}
 
-            {campaign.status === "STOPPED" && (
+            {(campaign.status === "STOPPED" || campaign.status === "COMPLETED") && (
               <button
                 type="button"
-                onClick={() => handleControl("resume")}
-                disabled={actionLoading === "resume"}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2 transition shadow-sm flex-1 sm:flex-initial justify-center"
+                onClick={() => handleControl("restart")}
+                disabled={actionLoading === "restart"}
+                className="btn-emerald-primary text-xs px-4 py-2.5 flex items-center gap-2 shadow-sm flex-1 sm:flex-initial justify-center transition transform hover:-translate-y-0.5"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Resume Remaining Calls</span>
+                <span>Re-run All Calls (One by One)</span>
               </button>
-            )}
-
-            {campaign.status === "COMPLETED" && (
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 bg-emerald-100/80 px-3 py-2 rounded-xl border border-emerald-200">
-                <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                <span>All Calls Completed</span>
-              </div>
             )}
           </div>
         </div>
+
+        {/* ─── LIVE NOW CALLING MONITOR BANNER (1-by-1 Sequential Focus) ─── */}
+        {campaign.status === "RUNNING" && activeContact && (
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-emerald-500/30 relative overflow-hidden animate-in fade-in duration-300">
+            {/* Background ambient glow */}
+            <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/10 relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 shadow-inner">
+                    <PhoneCall className="w-6 h-6 animate-bounce" />
+                  </div>
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-slate-900 animate-ping" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-[0.15em] bg-emerald-500/30 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-400/30">
+                      Now Calling • Call #{currentContactIndex} of {campaign.contacts.length}
+                    </span>
+                    <span className="text-xs text-slate-400">1-by-1 Queue</span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold font-heading text-white mt-1">
+                    {activeContact.name}
+                  </h3>
+                  <p className="text-xs font-mono text-emerald-300/80">
+                    {activeContact.phoneNumber} • {activeContact.language}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status and Audio Waves */}
+              <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+                {/* Audio visualizer simulation */}
+                <div className="flex items-center gap-1 h-6 px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.6s_ease-in-out_infinite] h-3" />
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.9s_ease-in-out_infinite] h-5" />
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.4s_ease-in-out_infinite] h-2" />
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.7s_ease-in-out_infinite] h-6" />
+                  <span className="w-1 bg-emerald-400 rounded-full animate-[pulse_0.5s_ease-in-out_infinite] h-4" />
+                </div>
+
+                <div className="text-right">
+                  <span
+                    className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border ${
+                      activeContact.status === "CONNECTED"
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/40 animate-pulse"
+                        : "bg-blue-500/20 text-blue-300 border-blue-400/40"
+                    }`}
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>{activeContact.status === "CONNECTED" ? "Connected & Speaking" : "Dialing Trunk..."}</span>
+                  </span>
+                  <div className="text-[11px] font-mono text-slate-400 mt-1">
+                    Duration: <span className="text-white font-bold">{activeContact.durationSeconds || 0}s</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedContact(activeContact)}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition border border-white/15"
+                >
+                  Inspect Live
+                </button>
+              </div>
+            </div>
+
+            {/* Live Streaming Transcript preview */}
+            <div className="mt-3.5 space-y-2 relative z-10">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Real-Time Conversation Stream (Harika Telugu Agent)</span>
+                </span>
+                {nextContact && (
+                  <span className="text-slate-400">
+                    Next in queue: <strong className="text-slate-200 font-medium">{nextContact.name} ({nextContact.phoneNumber})</strong>
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-black/30 rounded-2xl p-3 max-h-32 overflow-y-auto custom-scrollbar border border-white/10 text-xs space-y-2">
+                {activeContact.transcripts && activeContact.transcripts.length > 0 ? (
+                  activeContact.transcripts.map((t, idx) => (
+                    <div
+                      key={t.id || idx}
+                      className={`flex gap-2 ${t.role === "AI" ? "text-emerald-300" : "text-slate-200"}`}
+                    >
+                      <span className="font-bold shrink-0">{t.role === "AI" ? "Harika:" : `${activeContact.name}:`}</span>
+                      <p className="font-sans leading-relaxed">{t.content}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-slate-400 italic text-[11px] flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    Placing outbound trunk call to Indian number... conversation will appear here once connected.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Real-time Progress Bar */}
         <div className="bg-white rounded-2xl border border-[#E8EAE6] p-4 sm:p-5 shadow-xs space-y-2">
@@ -471,7 +582,7 @@ export default function CampaignDashboardPage({
                       </td>
                     </tr>
                   ) : (
-                    filteredContacts.map((contact) => {
+                    paginatedContacts.map((contact) => {
                       return (
                         <tr
                           key={contact.id}
@@ -594,6 +705,77 @@ export default function CampaignDashboardPage({
               </table>
             </div>
           </div>
+
+          {/* Pagination Controls for 1K+ Contacts Scale */}
+          {filteredContacts.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs text-slate-500">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span>
+                  Showing <strong className="text-slate-800 font-semibold">{Math.min((currentPage - 1) * pageSize + 1, filteredContacts.length)}</strong> to{" "}
+                  <strong className="text-slate-800 font-semibold">{Math.min(currentPage * pageSize, filteredContacts.length)}</strong> of{" "}
+                  <strong className="text-slate-800 font-semibold">{filteredContacts.length}</strong> contacts
+                </span>
+                <span className="text-slate-300">•</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Per page:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={1000}>1,000</option>
+                  </select>
+                </div>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    First
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-3 py-1 text-slate-600 font-semibold">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Last
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 

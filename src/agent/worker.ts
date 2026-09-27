@@ -31,7 +31,10 @@ initializeLogger({ level: "info", pretty: true });
 let loadedVad: any = null;
 async function getVad() {
   if (!loadedVad) {
-    loadedVad = await silero.VAD.load();
+    // Latency Optimization: Reduce minimum silence from 0.5s down to 0.28s (44% faster turn-taking)
+    loadedVad = await silero.VAD.load({
+      minSilenceDuration: 0.28,
+    });
   }
   return loadedVad;
 }

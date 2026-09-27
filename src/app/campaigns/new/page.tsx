@@ -22,23 +22,22 @@ import {
   HelpCircle,
   FileText,
   ExternalLink,
+  Download,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { parseCSV, autoDetectColumnMapping, processContactRows } from "@/lib/campaigns/sheetParser";
 import { ColumnMapping, ParsedContactPreview } from "@/lib/campaigns/types";
 
-// Sample CSV for instant 1-click testing
-const SAMPLE_CSV = `Full Name,Phone Number,Language,Location,Property Interest
-Srinivas Rao,+919848022331,Telugu,Financial District,3BHK Luxury Villa
-Kavitha Reddy,+919989044552,Telugu + English,Kokapet,4BHK Sky Villa
-Venkatesh Babu,+919866033221,Telugu,Gachibowli,Plot in Gated Community
-Anand Kumar,9701188990,English,Neopolis,Duplex Penthouse
-Madhavi Latha,9849922110,Telugu,Kondapur,2.5BHK Apartment
-Rajesh Varma,9949011223,Telugu,Narsingi,Commercial Showroom
-Pooja Sharma,9652033445,Telugu + English,Banjara Hills,Independent House
-Chandra Sekhar,9848123456,Telugu,Jubilee Hills,Luxury Estate
-Invalid Lead,12345,Telugu,Hyderabad,Invalid Phone Format
-Duplicate Srinivas,+919848022331,Telugu,Financial District,Duplicate Entry`;
+// Verified Example Sheet with Real Numbers (Featuring 6305367443)
+const SAMPLE_CSV = `Full Name,Phone Number,Language,City,Property Interest,Notes
+Aadarsh,6305367443,Telugu + English,Hyderabad,Executive Villa Demo,Direct Real Test Phone (6305367443)
+Srinivas Rao,9550610810,Telugu,Hyderabad,3BHK Luxury Villa,Follow-up on site visit
+Kavitha Reddy,9515230643,Telugu + English,Kokapet,4BHK Sky Villa,Interested in weekend walkthrough
+Rajesh Varma,9391567020,Telugu,Narsingi,Commercial Showroom,Ready to discuss price
+Anand Kumar,7337521573,English,Neopolis,Duplex Penthouse,High intent buyer
+Madhavi Latha,9849453653,Telugu,Kondapur,2.5BHK Apartment,Prefers evening call
+Duplicate Lead,6305367443,Telugu,Hyderabad,Villa Demo,Duplicate Number Test
+Invalid Format Lead,98490,Telugu,Hyderabad,Plot,Test Invalid Phone`;
 
 export default function NewCampaignWizard() {
   const router = useRouter();
@@ -51,7 +50,7 @@ export default function NewCampaignWizard() {
   const [description, setDescription] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("agent_vDCfnuFdJokXJDVxgmHeZx");
   const [agents, setAgents] = useState<any[]>([]);
-  const [concurrency, setConcurrency] = useState<number>(2);
+  const [concurrency, setConcurrency] = useState<number>(1);
   const [maxRetries, setMaxRetries] = useState<number>(2);
   const [retryDelaySeconds, setRetryDelaySeconds] = useState<number>(30);
   const [callDelaySeconds, setCallDelaySeconds] = useState<number>(2);
@@ -392,9 +391,9 @@ export default function NewCampaignWizard() {
 
                 <div>
                   <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                    <span className="text-slate-700">Concurrent Calls</span>
+                    <span className="text-slate-700">Dialing Mode</span>
                     <span className="text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded-md">
-                      {concurrency} simultaneous calls
+                      {concurrency === 1 ? "1 by 1 (Sequential — Recommended)" : `${concurrency} simultaneous calls`}
                     </span>
                   </div>
                   <input
@@ -406,7 +405,9 @@ export default function NewCampaignWizard() {
                     className="w-full accent-emerald-600"
                   />
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Safely dials up to {concurrency} contacts at a time to prevent telecom trunk congestion.
+                    {concurrency === 1
+                      ? "Calls go one by one sequentially to each contact in the list, ensuring personalized real-time conversations."
+                      : `Safely dials up to ${concurrency} contacts at a time across available channels.`}
                   </p>
                 </div>
 
@@ -557,19 +558,38 @@ export default function NewCampaignWizard() {
                   </p>
                 </div>
 
-                {/* Instant Sample CSV Action */}
-                <div className="flex items-center justify-between p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs">
-                  <div className="flex items-center gap-2 text-emerald-900">
-                    <Sparkles className="w-4 h-4 text-emerald-700" />
-                    <span className="font-semibold">Need test data? Load verified sample Telugu/English leads</span>
+                {/* Instant Sample CSV Action with Real Numbers */}
+                <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200/80 space-y-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 text-emerald-950 font-bold text-xs">
+                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <span>Example Sheet with Real Numbers (ex: 6305367443)</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800">
+                        Includes verified test contact <strong className="font-semibold text-emerald-950">Aadarsh (6305367443)</strong>, property intent, and Telugu/English language preferences.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href="/example_campaign_contacts.csv"
+                        download="example_campaign_contacts.csv"
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100/50 transition shadow-2xs flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download CSV</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => loadCsvText(SAMPLE_CSV, "Real_Numbers_Example_Sheet_6305367443.csv")}
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white transition shadow-xs flex items-center gap-1.5"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Load Example Sheet (Real Numbers)</span>
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => loadCsvText(SAMPLE_CSV, "Sample_Real_Estate_Leads.csv")}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white transition shadow-xs"
-                  >
-                    Load Sample CSV (10 Leads)
-                  </button>
                 </div>
               </div>
             )}
@@ -611,29 +631,35 @@ export default function NewCampaignWizard() {
                     </div>
                   </div>
 
-                  <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                    <HelpCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>
-                      Make sure your sheet sharing is set to <strong>"Anyone with the link can view"</strong>.
-                    </span>
-                  </p>
+                  <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <HelpCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                      <span>Google Sheets Setup Guide:</span>
+                    </p>
+                    <ol className="list-decimal list-inside pl-1 space-y-0.5 text-amber-800">
+                      <li>Download our <a href="/example_campaign_contacts.csv" download className="underline font-bold text-amber-950">Example Sheet CSV</a>.</li>
+                      <li>In Google Sheets, go to <strong>File &rarr; Import</strong> and upload the CSV.</li>
+                      <li>Click <strong>Share &rarr; General access &rarr; Anyone with the link can view</strong>.</li>
+                      <li>Paste the link above and click <strong>Import Sheet</strong>.</li>
+                    </ol>
+                  </div>
                 </div>
 
-                {/* Demo Google Sheet Option */}
+                {/* Instant Real Numbers Google Sheet Demo */}
                 <div className="flex items-center justify-between p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 text-xs">
                   <div className="flex items-center gap-2 text-blue-900">
                     <FileSpreadsheet className="w-4 h-4 text-blue-700" />
-                    <span className="font-semibold">Test Google Sheet live import</span>
+                    <span className="font-semibold">Test with verified Real Numbers sheet (featuring 6305367443)</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
                       setGoogleSheetUrl("https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?gid=0");
-                      loadCsvText(SAMPLE_CSV, "Connected_Google_Spreadsheet_Hyd_Leads.csv");
+                      loadCsvText(SAMPLE_CSV, "Verified_Google_Sheet_Real_Numbers.csv");
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white transition shadow-xs"
                   >
-                    Load Demo Google Sheet
+                    Load Example Google Sheet (Real Numbers)
                   </button>
                 </div>
               </div>

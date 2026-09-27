@@ -6,48 +6,56 @@ import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 
 export async function GET() {
   try {
-    const { prisma } = await import("@/lib/db/prisma");
-    const org = await prisma.organization.findFirst({ select: { id: true } });
-    const organizationId = org?.id;
+    const dbPromise = (async () => {
+      try {
+        const { prisma } = await import("@/lib/db/prisma");
+        const org = await prisma.organization.findFirst({ select: { id: true } });
+        const organizationId = org?.id;
 
-    // Use selective query (no SELECT *) scoped by organization
-    const dbAgents = await prisma.agent.findMany({
-      where: organizationId ? { organizationId } : undefined,
-      select: {
-        id: true,
-        organizationId: true,
-        name: true,
-        description: true,
-        instructions: true,
-        systemPrompt: true,
-        businessContext: true,
-        cartesiaVoiceId: true,
-        cartesiaAgentId: true,
-        cartesiaModel: true,
-        llmModel: true,
-        language: true,
-        status: true,
-        initialMessage: true,
-        createdAt: true,
-        updatedAt: true,
-        phoneNumber: { select: { e164Number: true } },
-        business: {
+        return await prisma.agent.findMany({
+          where: organizationId ? { organizationId } : undefined,
           select: {
+            id: true,
+            organizationId: true,
             name: true,
             description: true,
-            information: true,
-            operatingHours: true,
-            address: true,
-            contactInformation: true,
-            website: true,
+            instructions: true,
+            systemPrompt: true,
+            businessContext: true,
+            cartesiaVoiceId: true,
+            cartesiaAgentId: true,
+            cartesiaModel: true,
+            llmModel: true,
+            language: true,
+            status: true,
+            initialMessage: true,
+            createdAt: true,
+            updatedAt: true,
+            phoneNumber: { select: { e164Number: true } },
+            business: {
+              select: {
+                name: true,
+                description: true,
+                information: true,
+                operatingHours: true,
+                address: true,
+                contactInformation: true,
+                website: true,
+              },
+            },
+            tools: {
+              select: { name: true, description: true, isEnabled: true, enabled: true },
+            },
           },
-        },
-        tools: {
-          select: { name: true, description: true, isEnabled: true, enabled: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+          orderBy: { createdAt: "desc" },
+        });
+      } catch {
+        return [];
+      }
+    })().catch(() => []);
+
+    const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1000));
+    const dbAgents = (await Promise.race([dbPromise, timeoutPromise])) || [];
 
     for (const dbA of dbAgents) {
       let parsedBizProfile: any = undefined;
@@ -92,12 +100,17 @@ export async function GET() {
         estimatedCost: 0,
         lastActive: "Active",
         createdAt: dbA.createdAt.toISOString(),
-        tools: dbA.tools.map((t) => ({
+        tools: dbA.tools.map((t: any) => ({
           name: t.name,
           description: t.description,
           isEnabled: t.enabled && t.isEnabled,
         })),
-        cartesiaAgentId: dbA.cartesiaAgentId || (dbA.id.startsWith("agent_") ? dbA.id : undefined),
+        cartesiaAgentId:
+          dbA.id.startsWith("agent_")
+            ? dbA.id
+            : dbA.cartesiaAgentId && dbA.cartesiaAgentId.startsWith("agent_")
+            ? dbA.cartesiaAgentId
+            : undefined,
       };
 
       dataStore.createAgentWithId(agentItem);
@@ -113,7 +126,7 @@ export async function GET() {
           cartesiaAgentId: agentItem.cartesiaAgentId,
           cartesiaVoiceId: agentItem.cartesiaVoiceId,
           language: dbA.language,
-          enabledTools: agentItem.tools.filter((t) => t.isEnabled),
+          enabledTools: agentItem.tools.filter((t: any) => t.isEnabled),
           phoneNumber: agentItem.phoneNumber,
           updatedAt: dbA.updatedAt.toISOString(),
         });
@@ -123,8 +136,74 @@ export async function GET() {
     console.warn("DB query in GET /api/agents fallback:", err);
   }
 
-  const agents = dataStore.getAgents();
-  return NextResponse.json({ success: true, agents });
+  // Dynamically discover and sync all live agents directly from Cartesia API
+  try {
+    const cartesiaKey = process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    const cRes = await fetch("https://api.cartesia.ai/agents", {
+      headers: {
+        "X-API-Key": cartesiaKey,
+        "Cartesia-Version": "2025-04-16",
+      },
+    });
+    if (cRes.ok) {
+      const cData = await cRes.json();
+      const summaries = cData.summaries || cData.data || [];
+      for (const ca of summaries) {
+        const existing = dataStore.getAgent(ca.id);
+        const prompt = ca.llm_system_prompt || ca.llm?.system_prompt || "";
+        const intro = ca.llm_introduce || ca.llm?.introduce || "";
+        const voiceId = ca.tts_voice || ca.voice?.id || "41508a7d-4839-445f-ba7f-687f620ed0e7";
+        const isEnglish = ca.tts_language === "en";
+
+        const syncedAgent = {
+          id: ca.id,
+          name: existing?.name || ca.name || "Cartesia Agent",
+          description: existing?.description || `Live Cartesia edge agent (${ca.id})`,
+          language: isEnglish ? AgentLanguage.ENGLISH : AgentLanguage.TELUGU_ENGLISH,
+          status: AgentStatus.ACTIVE,
+          systemPrompt: prompt || existing?.systemPrompt || "",
+          instructions: prompt || existing?.instructions || "",
+          initialMessage: intro || existing?.initialMessage || "",
+          businessContext: existing?.businessContext || "QETADOTIN Voice AI",
+          cartesiaVoiceId: voiceId,
+          cartesiaAgentId: ca.id,
+          cartesiaVoiceName: ca.name?.toLowerCase().includes("harika") || ca.name?.toLowerCase().includes("attendance")
+            ? "Harika (Telugu Faculty Voice)"
+            : "Sonic-3.6 Cloned",
+          hasBackgroundSound: Boolean(ca.background_sound_file_id),
+          backgroundSoundFileId: ca.background_sound_file_id,
+          backgroundSoundVolume: ca.background_volume,
+          cartesiaModel: "sonic-3.6",
+          llmModel: "gemini-2.5-flash",
+          sarvamModel: "saaras:v3-realtime",
+          sarvamLanguage: "te-IN",
+          phoneNumber: "+91 80 7158 2667",
+          callsCount: existing?.callsCount || 0,
+          totalMinutes: existing?.totalMinutes || 0,
+          estimatedCost: existing?.estimatedCost || 0,
+          lastActive: "Active & Deployed",
+          createdAt: ca.created_at || new Date().toISOString(),
+          tools: existing?.tools || [
+            { name: "end_call", description: "End call politely when conversation concludes", isEnabled: true },
+          ],
+        };
+        dataStore.createAgentWithId(syncedAgent as any);
+      }
+    }
+  } catch (cSyncErr) {
+    console.warn("[AGENTS_API] Could not sync live Cartesia agents:", cSyncErr);
+  }
+
+  try {
+    const agents = dataStore.getAgents();
+    return NextResponse.json({ success: true, agents });
+  } catch (outerErr: any) {
+    console.error("[CRITICAL GET /api/agents EXCEPTION]:", outerErr);
+    return NextResponse.json(
+      { success: false, error: outerErr?.message, stack: outerErr?.stack },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
