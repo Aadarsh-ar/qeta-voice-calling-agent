@@ -260,97 +260,8 @@ class DataStore {
     },
   ];
 
-  private agents: AgentItem[] = [
-    {
-      id: "agent_vDCfnuFdJokXJDVxgmHeZx",
-      name: "College Attendance Notification (COMPLAINT)",
-      description: "College Faculty attendance notification voice agent communicating with parents in polite natural Telugu.",
-      language: AgentLanguage.TELUGU,
-      status: AgentStatus.ACTIVE,
-      systemPrompt: `# పాత్ర (Role)\n\nనువ్వు College లో పనిచేసే ఒక కాలేజ్ లెక్చరర్ / ఫ్యాకల్టీ మెంబర్‌గా విద్యార్థి తల్లిదండ్రులకు ఫోన్ చేసే AI Voice Agent.\n\nనీ ప్రధాన ఉద్దేశ్యం విద్యార్థి attendance తక్కువగా ఉందని తల్లిదండ్రులకు మర్యాదగా తెలియజేయడం.\n\nGreeting: “నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.”\n\n## CONVERSATION END & AUTO-HANGUP RULES\n1. Keep the call active during the entire natural conversation.\n2. NEVER terminate the call because of temporary silence, pauses, thinking time, or network delays.\n3. The call should terminate ONLY when the conversation has clearly ended.\n4. Detect explicit user endings (bye, goodbye, thank you bye, that's all, I'm done, no more questions, బై, గుడ్ బై, థాంక్యూ బై, ఇంక చాలు, సరే మరి, ఇంకేమీ లేదు, అంతే అండి).\n5. Always deliver short natural closing: "ధన్యవాదాలు అండి! Eshwar అటెండెన్స్ ఒకసారి చూసుకోండి. హావ్ ఎ గ్రేట్ డే, బై!".\n6. Always finish speaking the closing sentence BEFORE terminating the call.\n7. Inactivity rule: If caller is silent for a prolonged period, ask "హలో అండి, లైన్ లో ఉన్నారా?" before concluding.`,
-      instructions: `# పాత్ర (Role)\n\nనువ్వు College లో పనిచేసే ఒక కాలేజ్ లెక్చరర్ / ఫ్యాకల్టీ మెంబర్‌గా విద్యార్థి తల్లిదండ్రులకు ఫోన్ చేసే AI Voice Agent.\n\nనీ ప్రధాన ఉద్దేశ్యం విద్యార్థి attendance తక్కువగా ఉందని తల్లిదండ్రులకు మర్యాదగా తెలియజేయడం.\n\nGreeting: “నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.”\n\n## CONVERSATION END & AUTO-HANGUP RULES\n1. Keep the call active during the entire natural conversation.\n2. NEVER terminate the call because of temporary silence, pauses, thinking time, or network delays.\n3. The call should terminate ONLY when the conversation has clearly ended.\n4. Detect explicit user endings (bye, goodbye, thank you bye, that's all, I'm done, no more questions, బై, గుడ్ బై, థాంక్యూ బై, ఇంక చాలు, సరే మరి, ఇంకేమీ లేదు, అంతే అండి).\n5. Always deliver short natural closing: "ధన్యవాదాలు అండి! Eshwar అటెండెన్స్ ఒకసారి చూసుకోండి. హావ్ ఎ గ్రేట్ డే, బై!".\n6. Always finish speaking the closing sentence BEFORE terminating the call.\n7. Inactivity rule: If caller is silent for a prolonged period, ask "హలో అండి, లైన్ లో ఉన్నారా?" before concluding.`,
-      businessContext: "College of Engineering — Department of Computer Science & Engineering.",
-      cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-      cartesiaAgentId: "agent_vDCfnuFdJokXJDVxgmHeZx",
-      cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
-      hasBackgroundSound: true,
-      backgroundSoundFileId: "file_siZms5AFqX2AmKDZXZFvRV",
-      backgroundSoundVolume: 0.35,
-      backgroundSoundName: "Office Ambience",
-      cartesiaModel: "sonic-3.6",
-      llmModel: "gemini-2.5-flash",
-      sarvamModel: "saaras:v3-realtime",
-      sarvamLanguage: "te-IN",
-      phoneNumber: "+91 80 7158 2667",
-      callsCount: 2,
-      totalMinutes: 5,
-      estimatedCost: 12.5,
-      lastActive: "Active & Deployed",
-      createdAt: new Date().toISOString(),
-      tools: [
-        { name: "end_call", description: "End call politely when conversation concludes", isEnabled: true },
-        { name: "transfer_call", description: "Transfer to department head (+916305367443)", isEnabled: true },
-      ],
-      businessProfile: {
-        businessName: "College of Engineering",
-        description: "Premier engineering college and academic institution.",
-        productsServices: "Computer Science & Engineering, Academic Programs, Attendance Management",
-        workingHours: "Monday to Friday 9:00 AM - 5:00 PM IST",
-        location: "College Campus, Department of CSE",
-        contactInfo: "+91 80 7158 2667",
-        faqs: [
-          { question: "Required attendance ఎంత?", answer: "కాలేజ్ attendance requirement 75 శాతం సార్." },
-        ],
-        toneGuidelines: "Polite, caring, respectful, natural spoken Telugu.",
-        trainingExamples: [],
-      },
-      initialMessage: "నమస్తే అండి, నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీ అబ్బాయి అటెండెన్స్ గురించి కాల్ చేశాను.",
-      lastSyncedAt: new Date().toISOString(),
-      lastSyncStatus: "SYNCED",
-      isDemo: false,
-    },
-    {
-      id: "agent_WzcEn6kkRmPxAfBNHzvpa1",
-      name: "Personal Assistant (Sam)",
-      description: "Friendly, intelligent, and proactive AI Personal Assistant for QETADOTIN with natural conversational Telugu & English.",
-      language: AgentLanguage.TELUGU_ENGLISH,
-      status: AgentStatus.ACTIVE,
-      systemPrompt: `# IDENTITY & ROLE\nYou are Sam, a friendly, intelligent, and proactive AI Personal Assistant for QETADOTIN.\n\n# VOICE BEHAVIOR\n- Natural, conversational Telugu, English, or Tenglish.\n- Keep turns concise (1 to 2 short sentences).\n- Speak warmly and listen attentively. No markdown formatting.`,
-      instructions: `# IDENTITY & ROLE\nYou are Sam, a friendly, intelligent, and proactive AI Personal Assistant for QETADOTIN.\n\n# VOICE BEHAVIOR\n- Natural, conversational Telugu, English, or Tenglish.\n- Keep turns concise (1 to 2 short sentences).\n- Speak warmly and listen attentively. No markdown formatting.`,
-      businessContext: "QETADOTIN Realtime Voice SaaS — Personal Assistant & Support.",
-      cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-      cartesiaAgentId: "agent_WzcEn6kkRmPxAfBNHzvpa1",
-      cartesiaVoiceName: "Sonic-3.6 (Sam)",
-      hasBackgroundSound: false,
-      cartesiaModel: "sonic-3.6",
-      llmModel: "gemini-2.5-flash",
-      sarvamModel: "saaras:v3-realtime",
-      sarvamLanguage: "te-IN",
-      phoneNumber: "+91 80 7158 2667",
-      callsCount: 1,
-      totalMinutes: 2,
-      estimatedCost: 5.0,
-      lastActive: "Active & Deployed",
-      createdAt: new Date().toISOString(),
-      tools: [
-        { name: "end_call", description: "End call politely when conversation concludes", isEnabled: true },
-      ],
-      businessProfile: {
-        businessName: "QETADOTIN Voice AI",
-        description: "Intelligent conversational voice calling agent.",
-        productsServices: "AI Voice Calls, Customer Support, Personal Assistant",
-        workingHours: "24/7 Available",
-        location: "Hyderabad, India",
-        contactInfo: "+91 80 7158 2667",
-        toneGuidelines: "Warm, proactive, friendly, concise.",
-        faqs: [],
-      },
-      initialMessage: "హాయ్! నేను సామ్. ఎలా ఉన్నారు? ఏదైనా మాట్లాడాలనిపిస్తే చెప్పండి.",
-      lastSyncedAt: new Date().toISOString(),
-      lastSyncStatus: "SYNCED",
-      isDemo: false,
-    },
-  ];
+  private deletedAgentIds: Set<string> = new Set();
+  private agents: AgentItem[] = [];
 
   private calls: CallItem[] = [
     {
@@ -541,13 +452,27 @@ class DataStore {
 
   // Agents
   getAgents(): AgentItem[] {
-    return this.agents;
+    return this.agents.filter(
+      (a) => !this.deletedAgentIds.has(a.id) && (!a.cartesiaAgentId || !this.deletedAgentIds.has(a.cartesiaAgentId))
+    );
+  }
+
+  setAgents(agents: AgentItem[]): void {
+    this.agents = agents.filter(
+      (a) => !this.deletedAgentIds.has(a.id) && (!a.cartesiaAgentId || !this.deletedAgentIds.has(a.cartesiaAgentId))
+    );
   }
 
   getAgent(id: string): AgentItem | undefined {
     if (!id) return undefined;
     const cleanId = id.trim();
-    return this.agents.find((a) => a.id === cleanId || a.cartesiaAgentId === cleanId);
+    if (this.deletedAgentIds.has(cleanId)) return undefined;
+    return this.agents.find(
+      (a) =>
+        (a.id === cleanId || a.cartesiaAgentId === cleanId) &&
+        !this.deletedAgentIds.has(a.id) &&
+        (!a.cartesiaAgentId || !this.deletedAgentIds.has(a.cartesiaAgentId))
+    );
   }
 
   createAgent(agent: Omit<AgentItem, "id" | "callsCount" | "totalMinutes" | "estimatedCost" | "lastActive" | "createdAt">): AgentItem {
@@ -566,6 +491,15 @@ class DataStore {
   }
 
   createAgentWithId(agent: AgentItem): AgentItem {
+    // If agent was explicitly deleted, permanently reject recreation/resurrection
+    if (
+      this.deletedAgentIds.has(agent.id) ||
+      (agent.cartesiaAgentId && this.deletedAgentIds.has(agent.cartesiaAgentId))
+    ) {
+      console.log(`[DATASTORE_RESURRECTION_BLOCKED] Agent "${agent.id}" was explicitly deleted. Ignored.`);
+      return agent;
+    }
+
     const existing = this.agents.find((a) => a.id === agent.id);
     if (existing) {
       return Object.assign(existing, agent);
@@ -575,6 +509,9 @@ class DataStore {
   }
 
   updateAgent(id: string, updates: Partial<AgentItem>): AgentItem {
+    if (this.deletedAgentIds.has(id)) {
+      return {} as any;
+    }
     const idx = this.agents.findIndex((a) => a.id === id);
     if (idx !== -1) {
       this.agents[idx] = { ...this.agents[idx], ...updates };
@@ -614,12 +551,48 @@ class DataStore {
   }
 
   deleteAgent(id: string): boolean {
-    this.agents = this.agents.filter((a) => a.id !== id);
+    const target = this.agents.find((a) => a.id === id || a.cartesiaAgentId === id);
+    this.deletedAgentIds.add(id);
+    if (target?.id) this.deletedAgentIds.add(target.id);
+    if (target?.cartesiaAgentId) this.deletedAgentIds.add(target.cartesiaAgentId);
+    this.agents = this.agents.filter((a) => a.id !== id && a.cartesiaAgentId !== id);
+
+    // Unassign any phone numbers pointing to this deleted agent
+    this.phoneNumbers.forEach((p) => {
+      if (p.assignedAgentId === id || (target?.cartesiaAgentId && p.assignedAgentId === target.cartesiaAgentId)) {
+        p.assignedAgentId = undefined;
+        p.assignedAgentName = undefined;
+      }
+    });
+
     return true;
   }
 
+  markAgentDeleted(id: string): void {
+    this.deletedAgentIds.add(id);
+    this.agents = this.agents.filter((a) => a.id !== id && a.cartesiaAgentId !== id);
+    this.phoneNumbers.forEach((p) => {
+      if (p.assignedAgentId === id) {
+        p.assignedAgentId = undefined;
+        p.assignedAgentName = undefined;
+      }
+    });
+  }
+
+  isAgentDeleted(id: string): boolean {
+    return this.deletedAgentIds.has(id);
+  }
+
   clearAllAgents(): void {
+    for (const a of this.agents) {
+      this.deletedAgentIds.add(a.id);
+      if (a.cartesiaAgentId) this.deletedAgentIds.add(a.cartesiaAgentId);
+    }
     this.agents = [];
+    this.phoneNumbers.forEach((p) => {
+      p.assignedAgentId = undefined;
+      p.assignedAgentName = undefined;
+    });
   }
 
   // Calls

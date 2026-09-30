@@ -482,7 +482,7 @@ model Campaign {
   updatedAt           DateTime       @updatedAt
 
   organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  agent               Agent          @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  agent               Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
   leads               CampaignLead[]
 
   @@index([organizationId])

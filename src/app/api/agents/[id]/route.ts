@@ -63,7 +63,16 @@ export async function GET(
     console.warn("DB agent retrieval exception in GET /api/agents/[id]:", err);
   }
 
+  if (dataStore.isAgentDeleted(id)) {
+    return NextResponse.json({ success: false, error: "Agent has been permanently deleted" }, { status: 404 });
+  }
+
   const existingStoreAgent = dataStore.getAgent(id);
+
+  if (!dbAgent && !existingStoreAgent) {
+    return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
+  }
+
   const targetCartesiaAgentId =
     dbAgent?.cartesiaAgentId ||
     (id.startsWith("agent_") ? id : undefined) ||
@@ -438,18 +447,95 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    dataStore.deleteAgent(id);
-    agentRuntimeCache.invalidate(id);
+    const cleanId = id.trim();
+
+    // 1. Resolve agent IDs (both DB cuid and Cartesia agent_xxx)
+    let cartesiaAgentId: string | undefined = cleanId.startsWith("agent_") ? cleanId : undefined;
+    let resolvedDbId: string = cleanId;
 
     try {
-      await prisma.agentKnowledge.deleteMany({ where: { agentId: id } });
-      await prisma.agentTool.deleteMany({ where: { agentId: id } });
-      await prisma.agent.delete({ where: { id } });
-    } catch {
-      // ignore if not present in DB
+      const dbAgent = await prisma.agent.findFirst({
+        where: {
+          OR: [{ id: cleanId }, { cartesiaAgentId: cleanId }],
+        },
+        select: { id: true, cartesiaAgentId: true },
+      });
+      if (dbAgent) {
+        resolvedDbId = dbAgent.id;
+        if (dbAgent.cartesiaAgentId) {
+          cartesiaAgentId = dbAgent.cartesiaAgentId;
+        }
+      }
+    } catch (lookupErr) {
+      console.warn("[AGENT_DELETE] DB lookup warning:", lookupErr);
     }
 
-    return NextResponse.json({ success: true, deleted: true });
+    // 2. Delete from Cartesia API so agent never resurrects from Cartesia sync
+    if (cartesiaAgentId) {
+      const { deleteCartesiaAgent } = await import("@/lib/cartesia/sync");
+      await deleteCartesiaAgent(cartesiaAgentId);
+    }
+
+    // 3. Mark deleted in DataStore and invalidate runtime cache
+    dataStore.deleteAgent(resolvedDbId);
+    dataStore.markAgentDeleted(resolvedDbId);
+    agentRuntimeCache.invalidate(resolvedDbId);
+
+    if (cartesiaAgentId) {
+      dataStore.deleteAgent(cartesiaAgentId);
+      dataStore.markAgentDeleted(cartesiaAgentId);
+      agentRuntimeCache.invalidate(cartesiaAgentId);
+    }
+
+    // 4. Clean up all database references and delete from PostgreSQL
+    try {
+      // Disconnect phone numbers and business from agent
+      await prisma.agent.updateMany({
+        where: { OR: [{ id: resolvedDbId }, ...(cartesiaAgentId ? [{ cartesiaAgentId }] : [])] },
+        data: { phoneNumberId: null, businessId: null },
+      });
+
+      // Detach calls
+      await prisma.call.updateMany({
+        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+        data: { agentId: null },
+      });
+
+      // Delete associated campaigns & leads
+      const campaigns = await prisma.campaign.findMany({
+        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+        select: { id: true },
+      });
+      for (const camp of campaigns) {
+        await prisma.campaignLead.deleteMany({ where: { campaignId: camp.id } }).catch(() => {});
+        await prisma.campaign.delete({ where: { id: camp.id } }).catch(() => {});
+      }
+
+      // Delete agent knowledge, tools, and deployments
+      await prisma.agentDeployment.deleteMany({
+        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+      }).catch(() => {});
+      await prisma.agentKnowledge.deleteMany({
+        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+      }).catch(() => {});
+      await prisma.agentTool.deleteMany({
+        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+      }).catch(() => {});
+
+      // Permanently delete agent row(s)
+      const deleteResult = await prisma.agent.deleteMany({
+        where: {
+          OR: [{ id: resolvedDbId }, ...(cartesiaAgentId ? [{ cartesiaAgentId }] : [])],
+        },
+      });
+      console.log(`[AGENT_DELETED_PERMANENTLY] Agent "${cleanId}" rows deleted from DB: ${deleteResult.count}`);
+    } catch (dbErr) {
+      console.error("[AGENT_DELETE_DB_ERROR] Failed during DB deletion:", dbErr);
+      throw dbErr;
+    }
+
+    console.log(`[AGENT_DELETED_PERMANENTLY] Agent "${cleanId}" successfully deleted across DB, Cartesia, and DataStore.`);
+    return NextResponse.json({ success: true, deleted: true, id: cleanId });
   } catch (err: unknown) {
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Error deleting agent" },

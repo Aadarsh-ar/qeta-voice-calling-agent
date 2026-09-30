@@ -6,19 +6,21 @@ import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 import { resolveOrgContext } from "@/lib/auth/orgContext";
 
 export async function GET(req: Request) {
+  let dbAgents: any[] = [];
+  const activeAgentItems: any[] = [];
+
   try {
+    const { prisma } = await import("@/lib/db/prisma");
+    const orgResult = await resolveOrgContext(req);
+    let orgFilter: { organizationId?: string } = {};
+    if ("error" in orgResult) {
+      console.warn(`[AGENTS_GET] Org resolution warning: ${orgResult.error} — using unscoped query (single-org compat)`);
+    } else {
+      orgFilter = { organizationId: orgResult.organizationId };
+    }
+
     const dbPromise = (async () => {
       try {
-        const { prisma } = await import("@/lib/db/prisma");
-        // ISO-1 fix: resolve org from request context, not findFirst()
-        const orgResult = await resolveOrgContext(req);
-        let orgFilter: { organizationId?: string } = {};
-        if ("error" in orgResult) {
-          console.warn(`[AGENTS_GET] Org resolution warning: ${orgResult.error} — using unscoped query (single-org compat)`);
-        } else {
-          orgFilter = { organizationId: orgResult.organizationId };
-        }
-
         return await prisma.agent.findMany({
           where: orgFilter,
           select: {
@@ -61,11 +63,13 @@ export async function GET(req: Request) {
       }
     })().catch(() => []);
 
-
-    const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1000));
-    const dbAgents = (await Promise.race([dbPromise, timeoutPromise])) || [];
+    dbAgents = (await dbPromise) || [];
 
     for (const dbA of dbAgents) {
+      if (dataStore.isAgentDeleted(dbA.id) || (dbA.cartesiaAgentId && dataStore.isAgentDeleted(dbA.cartesiaAgentId))) {
+        continue;
+      }
+
       let parsedBizProfile: any = undefined;
       if (dbA.businessContext && dbA.businessContext.trim().startsWith("{")) {
         try {
@@ -121,7 +125,7 @@ export async function GET(req: Request) {
             : undefined,
       };
 
-      dataStore.createAgentWithId(agentItem);
+      activeAgentItems.push(agentItem);
 
       // Warm runtime cache
       if (agentItem.cartesiaAgentId) {
@@ -144,7 +148,7 @@ export async function GET(req: Request) {
     console.warn("DB query in GET /api/agents fallback:", err);
   }
 
-  // Dynamically discover and sync all live agents directly from Cartesia API
+  // Dynamically sync live Cartesia agents ONLY for agents that exist in DB
   try {
     const cartesiaKey = process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
     const cRes = await fetch("https://api.cartesia.ai/agents", {
@@ -157,61 +161,37 @@ export async function GET(req: Request) {
       const cData = await cRes.json();
       const summaries = cData.summaries || cData.data || [];
       for (const ca of summaries) {
-        const existing = dataStore.getAgent(ca.id);
+        // If agent was explicitly deleted, skip immediately — NEVER recreate
+        if (dataStore.isAgentDeleted(ca.id) || (ca.name && dataStore.isAgentDeleted(ca.name))) {
+          continue;
+        }
+
+        // CRITICAL: Only sync if agent is already registered in DB — never resurrect unmanaged/deleted Cartesia agents
+        const existingInDb = dbAgents.some((d: any) => d.id === ca.id || d.cartesiaAgentId === ca.id);
+        if (!existingInDb) {
+          continue;
+        }
+
+        const existing = activeAgentItems.find((a) => a.id === ca.id || a.cartesiaAgentId === ca.id);
         const prompt = ca.llm_system_prompt || ca.llm?.system_prompt || "";
         const intro = ca.llm_introduce || ca.llm?.introduce || "";
         const voiceId = ca.tts_voice || ca.voice?.id || "41508a7d-4839-445f-ba7f-687f620ed0e7";
-        const isEnglish = ca.tts_language === "en";
 
-        const syncedAgent = {
-          id: ca.id,
-          name: existing?.name || ca.name || "Cartesia Agent",
-          description: existing?.description || `Live Cartesia edge agent (${ca.id})`,
-          language: isEnglish ? AgentLanguage.ENGLISH : AgentLanguage.TELUGU_ENGLISH,
-          status: AgentStatus.ACTIVE,
-          systemPrompt: prompt || existing?.systemPrompt || "",
-          instructions: prompt || existing?.instructions || "",
-          initialMessage: intro || existing?.initialMessage || "",
-          businessContext: existing?.businessContext || "QETADOTIN Voice AI",
-          cartesiaVoiceId: voiceId,
-          cartesiaAgentId: ca.id,
-          cartesiaVoiceName: ca.name?.toLowerCase().includes("harika") || ca.name?.toLowerCase().includes("attendance")
-            ? "Harika (Telugu Faculty Voice)"
-            : "Sonic-3.6 Cloned",
-          hasBackgroundSound: Boolean(ca.background_sound_file_id),
-          backgroundSoundFileId: ca.background_sound_file_id,
-          backgroundSoundVolume: ca.background_volume,
-          cartesiaModel: "sonic-3.6",
-          llmModel: "gemini-2.5-flash",
-          sarvamModel: "saaras:v3-realtime",
-          sarvamLanguage: "te-IN",
-          phoneNumber: "+91 80 7158 2667",
-          callsCount: existing?.callsCount || 0,
-          totalMinutes: existing?.totalMinutes || 0,
-          estimatedCost: existing?.estimatedCost || 0,
-          lastActive: "Active & Deployed",
-          createdAt: ca.created_at || new Date().toISOString(),
-          tools: existing?.tools || [
-            { name: "end_call", description: "End call politely when conversation concludes", isEnabled: true },
-          ],
-        };
-        dataStore.createAgentWithId(syncedAgent as any);
+        if (existing) {
+          if (prompt && !existing.instructions) existing.instructions = prompt;
+          if (intro && !existing.initialMessage) existing.initialMessage = intro;
+          if (voiceId && !existing.cartesiaVoiceId) existing.cartesiaVoiceId = voiceId;
+        }
       }
     }
   } catch (cSyncErr) {
     console.warn("[AGENTS_API] Could not sync live Cartesia agents:", cSyncErr);
   }
 
-  try {
-    const agents = dataStore.getAgents();
-    return NextResponse.json({ success: true, agents });
-  } catch (outerErr: any) {
-    console.error("[CRITICAL GET /api/agents EXCEPTION]:", outerErr);
-    return NextResponse.json(
-      { success: false, error: outerErr?.message, stack: outerErr?.stack },
-      { status: 500 }
-    );
-  }
+  // Update in-memory dataStore to strictly match active agents
+  dataStore.setAgents(activeAgentItems);
+
+  return NextResponse.json({ success: true, agents: activeAgentItems });
 }
 
 export async function POST(req: Request) {
@@ -299,11 +279,17 @@ export async function POST(req: Request) {
     const orgId = orgResult.organizationId;
 
 
-    // Find phone number record if provided
-    const phoneToAssign = phoneNumber || "+91 80 7158 2667";
-    const phoneRecord = await prisma.phoneNumber.findFirst({
-      where: { e164Number: phoneToAssign },
-    });
+    // Assign phone number ONLY if explicitly provided and not already assigned to another agent
+    let assignedPhoneNumberId: string | undefined = undefined;
+    if (phoneNumber) {
+      const phoneRecord = await prisma.phoneNumber.findFirst({
+        where: { e164Number: phoneNumber },
+        include: { assignedAgent: true },
+      });
+      if (phoneRecord && !phoneRecord.assignedAgent) {
+        assignedPhoneNumberId = phoneRecord.id;
+      }
+    }
 
     // Create Business record if provided
     let businessRecord = null;
@@ -337,7 +323,7 @@ export async function POST(req: Request) {
         sarvamLanguage: "te-IN",
         language: agentLanguage,
         status: AgentStatus.ACTIVE,
-        phoneNumberId: phoneRecord?.id,
+        phoneNumberId: assignedPhoneNumberId,
         businessId: businessRecord?.id,
         businessContext: JSON.stringify(bizProfile),
         tools: {
@@ -392,7 +378,7 @@ export async function POST(req: Request) {
       llmModel: "gemini-2.5-flash",
       sarvamModel: "saaras:v3-realtime",
       sarvamLanguage: "te-IN",
-      phoneNumber: phoneToAssign,
+      phoneNumber: phoneNumber || "+91 80 7158 2667",
       callsCount: 0,
       totalMinutes: 0,
       estimatedCost: 0,
@@ -412,7 +398,7 @@ export async function POST(req: Request) {
       cartesiaVoiceId: voiceId,
       language: agentLanguage,
       enabledTools: activeToolsList.filter((t: any) => t.isEnabled),
-      phoneNumber: phoneToAssign,
+      phoneNumber: phoneNumber || "+91 80 7158 2667",
       updatedAt: createdAgent.updatedAt.toISOString(),
     });
 
@@ -443,13 +429,29 @@ export async function POST(req: Request) {
 export async function DELETE() {
   try {
     const { prisma } = await import("@/lib/db/prisma");
+    const { deleteCartesiaAgent } = await import("@/lib/cartesia/sync");
+
+    // Clean up Cartesia agents
+    const currentAgents = dataStore.getAgents();
+    for (const a of currentAgents) {
+      if (a.cartesiaAgentId) {
+        await deleteCartesiaAgent(a.cartesiaAgentId).catch(() => {});
+      }
+    }
+
     try {
+      await prisma.agent.updateMany({ data: { phoneNumberId: null, businessId: null } });
+      await prisma.call.updateMany({ data: { agentId: null } });
+      await prisma.campaignLead.deleteMany();
+      await prisma.campaign.deleteMany();
+      await prisma.agentDeployment.deleteMany();
       await prisma.agentKnowledge.deleteMany();
       await prisma.agentTool.deleteMany();
       await prisma.agent.deleteMany();
     } catch (dbErr) {
       console.warn("DB agent deletion warning:", dbErr);
     }
+
     dataStore.clearAllAgents();
     agentRuntimeCache.clear();
     return NextResponse.json({ success: true, message: "All agents removed", agents: [] });

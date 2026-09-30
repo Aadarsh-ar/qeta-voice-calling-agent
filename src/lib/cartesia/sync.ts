@@ -341,3 +341,41 @@ export async function getCartesiaAgentDetails(agentId: string) {
 
   return await res.json();
 }
+
+/**
+ * Permanently deletes an agent from Cartesia's official Agent API.
+ * Prevents deleted agents from recurring or resurrecting during auto-discovery.
+ */
+export async function deleteCartesiaAgent(agentId: string): Promise<boolean> {
+  if (!agentId || agentId.trim().length === 0) return false;
+  let apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey || !apiKey.startsWith("sk_car_")) {
+    apiKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+  }
+
+  try {
+    const cleanId = agentId.trim();
+    console.log(`[CARTESIA_DELETE_DISPATCH] Deleting agent ${cleanId} from Cartesia API...`);
+    const res = await fetch(`${CARTESIA_API_BASE}/agents/${cleanId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-API-Key": apiKey,
+        "Cartesia-Version": CARTESIA_API_VERSION,
+      },
+    });
+
+    if (res.ok || res.status === 404) {
+      console.log(`[CARTESIA_DELETE_SUCCESS] Agent ${cleanId} successfully removed from Cartesia (HTTP ${res.status}).`);
+      return true;
+    } else {
+      const err = await res.text();
+      console.warn(`[CARTESIA_DELETE_WARN] Cartesia delete returned HTTP ${res.status}: ${err}`);
+      return false;
+    }
+  } catch (err: any) {
+    console.warn(`[CARTESIA_DELETE_ERROR] Network error deleting Cartesia agent: ${err?.message}`);
+    return false;
+  }
+}
+
