@@ -32,6 +32,7 @@ import { TestAgentModal } from "@/components/testing/TestAgentModal";
 import { RealPhoneCallModal } from "@/components/calling/RealPhoneCallModal";
 import { AgentItem, dataStore } from "@/lib/db/store";
 import { AgentStatus, AgentLanguage } from "@/lib/types/models";
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID, isValidVoiceId, getVoiceName } from "@/lib/config/voices";
 
 export default function AgentDetailPage({
   params,
@@ -68,7 +69,7 @@ export default function AgentDetailPage({
     (agent?.language as AgentLanguage) || AgentLanguage.TELUGU_ENGLISH
   );
   const [cartesiaVoiceId, setCartesiaVoiceId] = useState(
-    agent?.cartesiaVoiceId || "f9945b75-0f3b-448d-ba9e-3d22c229a68e"
+    agent?.cartesiaVoiceId || DEFAULT_VOICE_ID
   );
   const [isSaving, setIsSaving] = useState(false);
   const [saveStep, setSaveStep] = useState<"idle" | "saving" | "syncing" | "ready" | "error">("idle");
@@ -822,20 +823,25 @@ export default function AgentDetailPage({
                       <span className="text-slate-500">Voice Engine:</span>
                       <span className="text-slate-900 font-semibold">Ultra-Low Latency Neural Stream</span>
                     </div>
-                    <div className="flex items-center justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">Assigned Voice:</span>
-                      <select
-                        value={cartesiaVoiceId}
-                        onChange={(e) => setCartesiaVoiceId(e.target.value)}
-                        className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
-                      >
-                        <option value="41508a7d-4839-445f-ba7f-687f620ed0e7">
-                          Harika (Telugu Faculty Voice - Female)
-                        </option>
-                        <option value="f9945b75-0f3b-448d-ba9e-3d22c229a68e">
-                          AD (Telugu Voice - Male)
-                        </option>
-                      </select>
+                    <div className="flex flex-col py-1.5 border-b border-slate-200 gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Assigned Voice:</span>
+                        <select
+                          value={cartesiaVoiceId}
+                          onChange={(e) => setCartesiaVoiceId(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
+                        >
+                          {AVAILABLE_VOICES.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                        <span>Cartesia Voice ID:</span>
+                        <span className="truncate max-w-[200px]" title={cartesiaVoiceId}>{cartesiaVoiceId}</span>
+                      </div>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">Voice Synthesis:</span>

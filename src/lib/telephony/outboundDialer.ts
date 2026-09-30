@@ -10,6 +10,7 @@
 import { dataStore, CallItem } from "@/lib/db/store";
 import { CallDirection, CallStatus, MessageRole } from "@/lib/types/models";
 import { getTelephonyConfig, resolveWebhookBaseUrl } from "@/lib/config/telephony";
+import { isValidVoiceId, getVoiceName, DEFAULT_VOICE_ID } from "@/lib/config/voices";
 
 // Per-agent phone number ID cache — avoids sharing phone number IDs across agents/orgs (ISO-5 fix)
 const cachedFromNumberIds = new Map<string, string>();
@@ -21,6 +22,8 @@ export interface OutboundCallParams {
   businessContext?: string;
   campaignId?: string;
   contactId?: string;
+  workspaceId?: string;
+  dynamicVariables?: Record<string, string>;
 }
 
 export interface OutboundCallResult {
@@ -187,6 +190,23 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     };
   }
 
+  // Section 9: Voice Execution Safety — Validate assigned voice before starting call
+  const selectedVoiceId = agent.cartesiaVoiceId?.trim() || "";
+  if (!selectedVoiceId || !isValidVoiceId(selectedVoiceId)) {
+    const errMsg = `[VOICE_EXECUTION_SAFETY] Agent "${agent.name}" (${agent.id}) does not have a valid Cartesia voice ID configured (found: "${selectedVoiceId || "empty"}"). Cannot dispatch call without a valid voice. Selected voice must be one of the 4 configured Cartesia voices.`;
+    console.error(`[OUTBOUND_DIALER] ${errMsg}`);
+    return {
+      success: false,
+      callId: `call_${Date.now()}`,
+      vobizCallId: "",
+      telephonyStatus: "FAILED",
+      telephonyReason: errMsg,
+      cartesiaDispatched: false,
+      livekitDispatched: false,
+      error: errMsg,
+    };
+  }
+
   const resolvedAgentId = agent.id;
   const agentName = agent.name;
   const callId = `call_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
@@ -227,7 +247,14 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
         } catch {}
       }
 
-      console.log(`[OUTBOUND_DIALER] Dispatching call to ${cleanNumber} via Cartesia agent ${cartesiaAgentId} (${agentName})`);
+      console.log(`[OUTBOUND_DIALER] Dispatching call to ${cleanNumber} via Cartesia agent ${cartesiaAgentId} (${agentName}) with voice ${selectedVoiceId} (${getVoiceName(selectedVoiceId)})`);
+      const outboundPayload: Record<string, unknown> = {
+        to_number: cleanNumber,
+      };
+      if (params.dynamicVariables && Object.keys(params.dynamicVariables).length > 0) {
+        outboundPayload.dynamic_variables = params.dynamicVariables;
+      }
+
       const cartesiaCallRes = await fetch("https://api.cartesia.ai/agents/calls", {
         method: "POST",
         headers: {
@@ -239,7 +266,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
           from_number_id: fromNumberId,
           agent_id: cartesiaAgentId,
           ringing_timeout_seconds: 30,
-          outbound_calls: [{ to_number: cleanNumber }],
+          outbound_calls: [outboundPayload],
         }),
       });
 
@@ -264,7 +291,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
             from_number_id: fromNumberId,
             agent_id: cartesiaAgentId,
             ringing_timeout_seconds: 30,
-            outbound_calls: [{ to_number: cleanNumber }],
+            outbound_calls: [outboundPayload],
           }),
         });
         const retryData = await retryRes.json();
@@ -302,6 +329,11 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     stage: telephonyStatus === "FAILED" ? "FAILED" : "RINGING",
     vobizCallId,
     cartesiaAgentId,
+    campaignId: params.campaignId,
+    leadId: params.contactId,
+    workspaceId: params.workspaceId || (agent as any).organizationId,
+    cartesiaVoiceId: selectedVoiceId,
+    dynamicVariables: params.dynamicVariables,
     lastSuccessfulStage: cartesiaDispatched ? "CARTESIA_DISPATCHED" : "INITIATED",
     mediaConnected: cartesiaDispatched,
     cartesiaConnected: cartesiaDispatched,

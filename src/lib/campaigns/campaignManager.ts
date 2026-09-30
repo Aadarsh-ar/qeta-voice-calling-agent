@@ -452,7 +452,10 @@ class CampaignManager {
       agentId: agent.id, // Always use the validated agent — no hardcoded fallback IDs
       agentName,
       agentVoice,
+      cartesiaVoiceId: agent.cartesiaVoiceId,
       agentLanguage,
+      workspaceId: (agent as any).organizationId,
+      organizationId: (agent as any).organizationId,
       status: "DRAFT",
       concurrency,
       maxRetries,
@@ -841,6 +844,8 @@ class CampaignManager {
           businessContext,
           campaignId: campaign.id,
           contactId: contact.id,
+          workspaceId: campaign.workspaceId || campaign.organizationId,
+          dynamicVariables: leadContext.customVars,
         });
 
         if (dialerResult.callId) callId = dialerResult.callId;
@@ -848,9 +853,9 @@ class CampaignManager {
         telephonyStatus = dialerResult.telephonyStatus;
         cartesiaDispatched = dialerResult.cartesiaDispatched;
 
-        // If dialer explicitly failed with an agent-not-found error, fail this contact
-        if (!dialerResult.success && dialerResult.error?.includes("Agent")) {
-          this.handleCallFailure(campaign, contact, dialerResult.telephonyReason || dialerResult.error);
+        // If dialer explicitly failed (e.g. invalid voice, missing agent, bad number), fail this contact immediately
+        if (!dialerResult.success) {
+          this.handleCallFailure(campaign, contact, dialerResult.telephonyReason || dialerResult.error || "Dialer failed");
           return;
         }
       } catch (dialErr) {

@@ -136,6 +136,8 @@ export interface CallItem {
   campaignId?: string;
   leadId?: string;
   workspaceId?: string;
+  cartesiaVoiceId?: string;
+  dynamicVariables?: Record<string, string>;
   audioFramesSent?: number;
   bytesReceived?: number;
   bytesSent?: number;

@@ -3,6 +3,7 @@ import { dataStore, AgentItem } from "@/lib/db/store";
 import { prisma } from "@/lib/db/prisma";
 import { syncAgentWithCartesia, getCartesiaAgentDetails } from "@/lib/cartesia/sync";
 import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
+import { isValidVoiceId, DEFAULT_VOICE_ID, AVAILABLE_VOICES, getVoiceName } from "@/lib/config/voices";
 
 export async function GET(
   req: Request,
@@ -109,8 +110,7 @@ export async function GET(
     liveCartesiaData?.tts_voice ||
     dbAgent?.cartesiaVoiceId ||
     existingStoreAgent?.cartesiaVoiceId ||
-    process.env.CARTESIA_VOICE_ID ||
-    "41508a7d-4839-445f-ba7f-687f620ed0e7";
+    DEFAULT_VOICE_ID;
 
   const liveLanguage =
     liveCartesiaData?.tts_language === "en"
@@ -152,7 +152,7 @@ export async function GET(
     businessContext: dbAgent?.businessContext || existingStoreAgent?.businessContext || "",
     businessProfile: parsedBizProfile || existingStoreAgent?.businessProfile,
     cartesiaVoiceId: liveVoiceId,
-    cartesiaVoiceName: existingStoreAgent?.cartesiaVoiceName || "Harika (Telugu Faculty Voice)",
+    cartesiaVoiceName: getVoiceName(liveVoiceId),
     cartesiaModel: dbAgent?.cartesiaModel || "sonic-3.6",
     llmModel: dbAgent?.llmModel || "gemini-2.5-flash",
     sarvamModel: "saaras:v3-realtime",
@@ -226,7 +226,16 @@ export async function PUT(
     const agentName = body.name || currentAgent?.name || "AD2 — Aadarsh";
     const agentInstructions = (body.instructions || body.systemPrompt || currentAgent?.instructions || currentAgent?.systemPrompt || "").trim();
     const initialMessage = body.initialMessage !== undefined ? body.initialMessage : currentAgent?.initialMessage;
-    const voiceId = body.cartesiaVoiceId || currentAgent?.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
+    let voiceId = (body.cartesiaVoiceId || currentAgent?.cartesiaVoiceId || DEFAULT_VOICE_ID).trim();
+    if (!isValidVoiceId(voiceId)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Invalid cartesiaVoiceId "${voiceId}". Must be one of the 4 configured Cartesia voices: ${AVAILABLE_VOICES.map((v) => `${v.name} (${v.id})`).join(", ")}`,
+        },
+        { status: 400 }
+      );
+    }
     const language = body.language || currentAgent?.language || "TELUGU_ENGLISH";
     const tools = body.tools || currentAgent?.tools || [];
 

@@ -63,8 +63,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: GraduationCap,
     description: "Proactively alerts parents and engineering students about semester attendance shortages, lab exam eligibility, fee payment deadlines, and hall ticket release schedules.",
     language: "Telugu & Tenglish",
-    voiceName: "AD Cloned Neural Voice (8kHz / 16kHz)",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Harika (Telugu Faculty Voice)",
+    voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
     openingGreeting: "నమస్కారం అండి, నేను ఇంజనీరింగ్ కాలేజ్ అడ్మినిస్ట్రేషన్ నుంచి మాట్లాడుతున్నాను. మీ అబ్బాయి/అమ్మాయి అటెండెన్స్ మరియు సెమిస్టర్ ఎగ్జామ్ ఫీజు వివరాల గురించి మాట్లాడటానికి కాల్ చేశాను. మీరు వినగలరా?",
     systemPrompt: `మీరు ఇంజనీరింగ్ కాలేజ్ అధికారిక AI వాయిస్ కౌన్సెలర్.
 లక్ష్యం:
@@ -96,8 +96,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: Building2,
     description: "Calls inbound property inquiries within 10 seconds, answers pricing, RERA status, and floor plans, and schedules weekend VIP site visits with Google Maps directions.",
     language: "Telugu & English",
-    voiceName: "AD Cloned Neural Voice",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Vamshi (Telugu Professional Male Voice)",
+    voiceId: "7a80db73-b204-4cb7-aa26-8c43a79d557c",
     openingGreeting: "నమస్కారం అండి! QETADOTIN ప్రైమ్ విల్లాస్ నుంచి మాట్లాడుతున్నాను. మన కొత్త గేటెడ్ కమ్యూనిటీ విల్లా ప్రాజెక్ట్ బ్రోచర్ డౌన్‌లోడ్ చేశారు కదా, ఈ వీకెండ్ సైట్ విజిట్ కోసం స్లాట్ బుక్ చేయమంటారా?",
     systemPrompt: `మీరు QETADOTIN Prime Villas కు చెందిన అధికారిక లగ్జరీ రియల్ ఎస్టేట్ సేల్స్ కన్సల్టెంట్.
 లక్ష్యం:
@@ -129,8 +129,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: PhoneCall,
     description: "Calls online buyers immediately to verify shipping address landmarks, confirm Cash-on-Delivery readiness, and reschedule or cancel duplicate orders before dispatch.",
     language: "Telugu & Tenglish",
-    voiceName: "AD Cloned Neural Voice",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Priya (Telugu Conversational Voice)",
+    voiceId: "480e1f44-cdab-4777-851a-236e06b04672",
     openingGreeting: "హలో అండి! మీ ఆన్‌లైన్ క్యాష్-ఆన్-డెలివరీ ఆర్డర్ కన్ఫర్మేషన్ కోసం కాల్ చేస్తున్నాను. రూ. 1,499 ఆర్డర్ రేపు డెలివరీకి రెడీగా ఉంది, మీరు అడ్రస్ వద్ద అందుబాటులో ఉంటారా?",
     systemPrompt: `మీరు ఈ-కామర్స్ డెలివరీ నెట్‌వర్క్ కు చెందిన అఫీషియల్ వెరిఫికేషన్ అసిస్టెంట్.
 లక్ష్యం:
@@ -160,8 +160,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: Calendar,
     description: "Handles patient phone inquiries 24/7, checks doctor schedules, books consultation slots, and sends WhatsApp confirmation tokens with clinic Google Maps directions.",
     language: "Telugu & English",
-    voiceName: "AD Cloned Neural Voice",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Priya (Telugu Conversational Voice)",
+    voiceId: "480e1f44-cdab-4777-851a-236e06b04672",
     openingGreeting: "నమస్కారం అండి, సిటీ కేర్ సూపర్ స్పెషాలిటీ క్లినిక్ కి స్వాగతం. మీరు ఏ డాక్టర్ గారికి అపాయింట్‌మెంట్ తీసుకోవాలనుకుంటున్నారో చెప్పగలరా?",
     systemPrompt: `మీరు సిటీ కేర్ హాస్పిటల్ కు చెందిన దయగల మరియు సమర్థవంతమైన క్లినిక్ రిసెప్షనిస్ట్.
 లక్ష్యం:
@@ -192,8 +192,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: UtensilsCrossed,
     description: "Takes incoming table reservations during peak rush hours, provides menu recommendations (Thalis, Biryanis), and manages family banquet hall bookings.",
     language: "Telugu & English",
-    voiceName: "AD Cloned Neural Voice",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Harika (Telugu Faculty Voice)",
+    voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
     openingGreeting: "నమస్కారం! రాయలసీమ రుచులు రెస్టారెంట్ కి స్వాగతం. ఈ రోజు లంచ్ లేదా డిన్నర్ కోసం టేబుల్ రిజర్వేషన్ చేయమంటారా?",
     systemPrompt: `మీరు రాయలసీమ రుచులు సాంప్రదాయ రెస్టారెంట్ యొక్క హోస్టెస్.
 లక్ష్యం:
@@ -224,8 +224,8 @@ const TEMPLATES: AgentTemplate[] = [
     icon: CreditCard,
     description: "Politely informs borrowers 2-3 days prior to monthly EMI auto-debit dates, answers query on interest calculations, and dispatches direct UPI deep-links to prevent bounce penalties.",
     language: "Telugu & English",
-    voiceName: "AD Cloned Neural Voice",
-    voiceId: "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
+    voiceName: "Arjun (Telugu Dynamic Male Voice)",
+    voiceId: "9dfd1c5f-e623-488e-99ec-7344e6b4be51",
     openingGreeting: "నమస్కారం అండి, మీ లోన్ EMI పేమెంట్ గడువు రేపటితో ముగుస్తుంది. ఆన్‌లైన్ పేమెంట్ లింక్ ద్వారా సులభంగా పే చేయడానికి సహాయపడమంటారా?",
     systemPrompt: `మీరు ప్రముఖ ఫిన్‌టెక్ లోన్ ప్లాట్‌ఫారమ్ యొక్క మర్యాదపూర్వక మరియు కంప్లైంట్ EMI అసిస్టెంట్.
 లక్ష్యం:

@@ -4,6 +4,7 @@ import { AgentLanguage, AgentStatus } from "@/lib/types/models";
 import { syncAgentWithCartesia } from "@/lib/cartesia/sync";
 import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 import { resolveOrgContext } from "@/lib/auth/orgContext";
+import { isValidVoiceId, DEFAULT_VOICE_ID, AVAILABLE_VOICES, getVoiceName } from "@/lib/config/voices";
 
 export async function GET(req: Request) {
   let dbAgents: any[] = [];
@@ -100,8 +101,8 @@ export async function GET(req: Request) {
         initialMessage: dbA.initialMessage || "",
         businessContext: dbA.businessContext || "",
         businessProfile: parsedBizProfile,
-        cartesiaVoiceId: dbA.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-        cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+        cartesiaVoiceId: dbA.cartesiaVoiceId || DEFAULT_VOICE_ID,
+        cartesiaVoiceName: getVoiceName(dbA.cartesiaVoiceId || DEFAULT_VOICE_ID),
         cartesiaModel: dbA.cartesiaModel,
         llmModel: dbA.llmModel,
         sarvamModel: "saaras:v3-realtime",
@@ -229,7 +230,20 @@ export async function POST(req: Request) {
         : undefined;
 
     const bizProfile = businessProfile || {};
-    const voiceId = cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e";
+    let voiceId = (cartesiaVoiceId || "").trim();
+    if (voiceId) {
+      if (!isValidVoiceId(voiceId)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Invalid cartesiaVoiceId "${voiceId}". Must be one of the 4 configured Cartesia voices: ${AVAILABLE_VOICES.map((v) => `${v.name} (${v.id})`).join(", ")}`,
+          },
+          { status: 400 }
+        );
+      }
+    } else {
+      voiceId = DEFAULT_VOICE_ID;
+    }
     const agentLanguage = language || AgentLanguage.TELUGU_ENGLISH;
 
     // ── STEP 1: Synchronize with Cartesia Official Agent API ──────────────────

@@ -72,11 +72,16 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
   const voiceId = params.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7";
   const languageCode = params.language === "ENGLISH" ? "en" : "te";
 
-  const slugName = params.agentName
+  let slugName = params.agentName
     .toLowerCase()
+    .replace(/^agent[_\-]/g, "ag-")
     .replace(/[^a-z0-9_\-.]/g, "-")
     .replace(/--+/g, "-")
     .replace(/^-|-$/g, "") || "voice-agent";
+
+  if (slugName.startsWith("agent_") || slugName.startsWith("agent-")) {
+    slugName = "vaani-" + slugName;
+  }
 
   // 2. Prepare payload conforming strictly to Cartesia Agent API schema
   const payload: Record<string, unknown> = {
@@ -120,30 +125,30 @@ export async function syncAgentWithCartesia(params: SyncAgentParams): Promise<Sy
   let resultingAgentId = targetAgentId;
 
   if (!response.ok) {
-    // If targetAgentId returned 404 (nonexistent/deleted on Cartesia), initiate auto-recovery
+    // If targetAgentId returned 404 (nonexistent/deleted on Cartesia), create a fresh dedicated agent for this agent
     if (response.status === 404 && hasExistingAgent) {
-      console.warn(`[CARTESIA_SYNC_404] Target agent ${targetAgentId} not found on Cartesia (404). Initiating auto-recovery...`);
+      console.warn(`[CARTESIA_SYNC_404] Target agent ${targetAgentId} not found on Cartesia (404). Creating dedicated fresh agent for "${params.agentName}"...`);
 
-      // Step A: Check if account already has an active agent
+      // Create a fresh dedicated agent rather than hijacking another agent from the account
       let resolvedAgentId: string | null = null;
       try {
-        const listRes = await fetch(`${CARTESIA_API_BASE}/agents`, {
+        const createRes = await fetch(`${CARTESIA_API_BASE}/agents`, {
+          method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "X-API-Key": apiKey,
             "Cartesia-Version": CARTESIA_API_VERSION,
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({ name: slugName }),
         });
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const summaries = listData.summaries || listData.data || (Array.isArray(listData) ? listData : []);
-          if (summaries.length > 0 && summaries[0].id) {
-            resolvedAgentId = summaries[0].id;
-            console.log(`[CARTESIA_SYNC_RECOVERY] Found active Cartesia agent ${resolvedAgentId} in account. Patching instructions...`);
-          }
+        if (createRes.ok) {
+          const created = await createRes.json();
+          resolvedAgentId = created.id;
+          console.log(`[CARTESIA_SYNC_RECOVERY] Fresh dedicated agent ${resolvedAgentId} created on Cartesia. Applying config...`);
         }
-      } catch (listErr) {
-        console.warn("[CARTESIA_SYNC_RECOVERY_LIST_ERR]", listErr);
+      } catch (createErr) {
+        console.warn("[CARTESIA_SYNC_RECOVERY_CREATE_ERR]", createErr);
       }
 
       // Step B: If active agent found, patch it with instructions

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { agentOrchestrator } from "@/lib/agent/orchestrator";
 import { dataStore, AgentItem } from "@/lib/db/store";
 import { prisma } from "@/lib/db/prisma";
+import { DEFAULT_VOICE_ID, getVoiceName } from "@/lib/config/voices";
 
 export const dynamic = "force-dynamic";
 
@@ -55,8 +56,8 @@ export async function POST(req: Request) {
               initialMessage: dbAgent.initialMessage || undefined,
               businessContext: dbAgent.businessContext || "",
               businessProfile: parsedBizProfile,
-              cartesiaVoiceId: dbAgent.cartesiaVoiceId || process.env.CARTESIA_VOICE_ID || "f9945b75-0f3b-448d-ba9e-3d22c229a68e",
-              cartesiaVoiceName: "AD (Cloned Telugu Voice)",
+              cartesiaVoiceId: dbAgent.cartesiaVoiceId || DEFAULT_VOICE_ID,
+              cartesiaVoiceName: getVoiceName(dbAgent.cartesiaVoiceId || DEFAULT_VOICE_ID),
               cartesiaModel: dbAgent.cartesiaModel,
               llmModel: dbAgent.llmModel,
               sarvamModel: dbAgent.sarvamModel,

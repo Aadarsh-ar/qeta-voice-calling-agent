@@ -18,6 +18,7 @@
 
 import { dataStore } from "@/lib/db/store";
 import { sanitizePhoneNumber } from "./sheetParser";
+import { isValidVoiceId, AVAILABLE_VOICES } from "@/lib/config/voices";
 import type { Campaign } from "./types";
 
 export interface ValidationResult {
@@ -70,11 +71,16 @@ export function validateCampaignStartConditions(
         );
       }
 
-      // 5. Voice configuration
+      // 5. Voice configuration — must be one of the 4 verified Cartesia voices
       if (!agent.cartesiaVoiceId || !agent.cartesiaVoiceId.trim()) {
         errors.push(
           `Agent "${agent.name}" has no voice configured. ` +
-          `Select a valid Cartesia voice for this agent before starting the campaign.`
+          `Select one of the 4 Cartesia voices for this agent before starting the campaign.`
+        );
+      } else if (!isValidVoiceId(agent.cartesiaVoiceId)) {
+        errors.push(
+          `Agent "${agent.name}" has an invalid Cartesia voice ID ("${agent.cartesiaVoiceId}"). ` +
+          `Must be one of the 4 configured Cartesia voices: ${AVAILABLE_VOICES.map((v) => `${v.name} (${v.id})`).join(", ")}`
         );
       }
 
@@ -171,6 +177,37 @@ export function validateCampaignStartConditions(
 }
 
 /**
+ * Interpolates template variables in instructions or greetings.
+ * Replaces {{key}}, {{ key }}, {key} with the lead's personalized value.
+ * Case-insensitive match on variable names.
+ * Ensures raw placeholders like {{name}} are NEVER uttered in production calls.
+ */
+export function interpolateDynamicVariables(
+  template: string,
+  variables: Record<string, string | number | boolean | undefined | null>
+): string {
+  if (!template) return "";
+
+  // Normalize lookup map with lowercase, trimmed keys
+  const lookup: Record<string, string> = {};
+  for (const [k, v] of Object.entries(variables)) {
+    if (v !== undefined && v !== null) {
+      lookup[k.toLowerCase().trim()] = String(v).trim();
+    }
+  }
+
+  // Regex matches {{variable_name}} or {variable_name}
+  return template.replace(/\{\{\s*([a-zA-Z0-9_\-]+)\s*\}\}|\{\s*([a-zA-Z0-9_\-]+)\s*\}/g, (match, p1, p2) => {
+    const rawKey = (p1 || p2 || "").toLowerCase().trim();
+    if (rawKey in lookup && lookup[rawKey].length > 0) {
+      return lookup[rawKey];
+    }
+    // Safely remove placeholder if unmapped — never say "{{name}}" to customer
+    return "";
+  });
+}
+
+/**
  * Creates an isolated per-lead execution context.
  * Each call must receive variables ONLY from its own lead — never from another.
  * This is the enforcement point for Rule #8 (Lead Variable Protection).
@@ -179,6 +216,9 @@ export function buildIsolatedLeadContext(
   campaign: Campaign,
   contactId: string
 ): {
+  workspaceId?: string;
+  campaignId: string;
+  contactId: string;
   leadName: string;
   leadPhone: string;
   leadLanguage: string;
@@ -194,12 +234,21 @@ export function buildIsolatedLeadContext(
     return null;
   }
 
-  // Build ONLY this lead's variables — no shared state, no reference to other contacts
-  const customVars: Record<string, string> = {};
+  // Build ONLY this lead's variables — strictly isolated from other leads
+  const customVars: Record<string, string> = {
+    name: contact.name,
+    fullname: contact.name,
+    phone: contact.phoneNumber,
+    phonenumber: contact.phoneNumber,
+  };
+
   if (contact.customData) {
     for (const [k, v] of Object.entries(contact.customData)) {
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-        customVars[String(k)] = String(v);
+        const valStr = String(v).trim();
+        customVars[String(k)] = valStr;
+        // Also map lowercase alias for seamless {{variable}} interpolation
+        customVars[String(k).toLowerCase()] = valStr;
       }
     }
   }
@@ -210,10 +259,13 @@ export function buildIsolatedLeadContext(
     `Customer Name: ${contact.name}`,
     `Phone: ${contact.phoneNumber}`,
     contact.language ? `Language: ${contact.language}` : "",
-    ...Object.entries(customVars).map(([k, v]) => `${k}: ${v}`),
+    ...Object.entries(contact.customData || {}).map(([k, v]) => `${k}: ${v}`),
   ].filter(Boolean);
 
   return {
+    workspaceId: campaign.workspaceId || campaign.organizationId,
+    campaignId: campaign.id,
+    contactId: contact.id,
     leadName: contact.name,
     leadPhone: contact.phoneNumber,
     leadLanguage: contact.language || "Telugu + English",

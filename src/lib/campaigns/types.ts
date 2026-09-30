@@ -73,7 +73,10 @@ export interface Campaign {
   agentId: string;
   agentName?: string;
   agentVoice?: string;
+  cartesiaVoiceId?: string;
   agentLanguage?: string;
+  workspaceId?: string;
+  organizationId?: string;
   status: CampaignStatus;
   concurrency: number; // 1 to 10
   maxRetries: number; // 0 to 5

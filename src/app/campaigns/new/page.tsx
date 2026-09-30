@@ -28,17 +28,6 @@ import { Header } from "@/components/layout/Header";
 import { parseCSV, autoDetectColumnMapping, processContactRows } from "@/lib/campaigns/sheetParser";
 import { ColumnMapping, ParsedContactPreview } from "@/lib/campaigns/types";
 
-// Verified Example Sheet with Real Numbers (Featuring 6305367443)
-const SAMPLE_CSV = `Full Name,Phone Number,Language,City,Property Interest,Notes
-Aadarsh,6305367443,Telugu + English,Hyderabad,Executive Villa Demo,Direct Real Test Phone (6305367443)
-Srinivas Rao,9550610810,Telugu,Hyderabad,3BHK Luxury Villa,Follow-up on site visit
-Kavitha Reddy,9515230643,Telugu + English,Kokapet,4BHK Sky Villa,Interested in weekend walkthrough
-Rajesh Varma,9391567020,Telugu,Narsingi,Commercial Showroom,Ready to discuss price
-Anand Kumar,7337521573,English,Neopolis,Duplex Penthouse,High intent buyer
-Madhavi Latha,9849453653,Telugu,Kondapur,2.5BHK Apartment,Prefers evening call
-Duplicate Lead,6305367443,Telugu,Hyderabad,Villa Demo,Duplicate Number Test
-Invalid Format Lead,98490,Telugu,Hyderabad,Plot,Test Invalid Phone`;
-
 export default function NewCampaignWizard() {
   const router = useRouter();
 
@@ -372,7 +361,7 @@ export default function NewCampaignWizard() {
                   >
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name} — {a.language || "Telugu"} ({a.cartesiaVoiceName || "Sonic-3.6 Voice"})
+                        {a.name} — {a.language || "Telugu"} • Voice: {a.cartesiaVoiceName || a.cartesiaVoiceId}
                       </option>
                     ))}
                   </select>
@@ -557,40 +546,6 @@ export default function NewCampaignWizard() {
                     Supports files with Name, Phone, Language, and any custom metadata columns.
                   </p>
                 </div>
-
-                {/* Instant Sample CSV Action with Real Numbers */}
-                <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200/80 space-y-3">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2 text-emerald-950 font-bold text-xs">
-                        <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
-                        <span>Example Sheet with Real Numbers (ex: 6305367443)</span>
-                      </div>
-                      <p className="text-[11px] text-emerald-800">
-                        Includes verified test contact <strong className="font-semibold text-emerald-950">Aadarsh (6305367443)</strong>, property intent, and Telugu/English language preferences.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href="/example_campaign_contacts.csv"
-                        download="example_campaign_contacts.csv"
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100/50 transition shadow-2xs flex items-center gap-1.5"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download CSV</span>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => loadCsvText(SAMPLE_CSV, "Real_Numbers_Example_Sheet_6305367443.csv")}
-                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white transition shadow-xs flex items-center gap-1.5"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Load Example Sheet (Real Numbers)</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -634,33 +589,14 @@ export default function NewCampaignWizard() {
                   <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
                     <p className="font-semibold flex items-center gap-1.5">
                       <HelpCircle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                      <span>Google Sheets Setup Guide:</span>
+                      <span>Google Sheets Connection:</span>
                     </p>
                     <ol className="list-decimal list-inside pl-1 space-y-0.5 text-amber-800">
-                      <li>Download our <a href="/example_campaign_contacts.csv" download className="underline font-bold text-amber-950">Example Sheet CSV</a>.</li>
-                      <li>In Google Sheets, go to <strong>File &rarr; Import</strong> and upload the CSV.</li>
-                      <li>Click <strong>Share &rarr; General access &rarr; Anyone with the link can view</strong>.</li>
-                      <li>Paste the link above and click <strong>Import Sheet</strong>.</li>
+                      <li>Ensure your Google Sheet includes columns such as <strong>Name</strong> and <strong>Phone Number</strong>.</li>
+                      <li>In Google Sheets, click <strong>Share &rarr; General access &rarr; Anyone with the link can view</strong>.</li>
+                      <li>Paste the shareable link above and click <strong>Import Sheet</strong>.</li>
                     </ol>
                   </div>
-                </div>
-
-                {/* Instant Real Numbers Google Sheet Demo */}
-                <div className="flex items-center justify-between p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 text-xs">
-                  <div className="flex items-center gap-2 text-blue-900">
-                    <FileSpreadsheet className="w-4 h-4 text-blue-700" />
-                    <span className="font-semibold">Test with verified Real Numbers sheet (featuring 6305367443)</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGoogleSheetUrl("https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?gid=0");
-                      loadCsvText(SAMPLE_CSV, "Verified_Google_Sheet_Real_Numbers.csv");
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white transition shadow-xs"
-                  >
-                    Load Example Google Sheet (Real Numbers)
-                  </button>
                 </div>
               </div>
             )}
@@ -836,12 +772,61 @@ export default function NewCampaignWizard() {
         {/* ── STEP 4: PREVIEW, VALIDATION & LAUNCH ── */}
         {step === 4 && (
           <div className="bg-white rounded-3xl border border-[#E8EAE6] p-6 sm:p-8 shadow-xs space-y-6">
-            <div>
-              <h2 className="text-xl font-bold font-heading text-slate-900">Preview & Validate Contacts</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Verify cleaned Indian phone numbers (+91 E.164) and check for duplicates before starting.
-              </p>
-            </div>
+            {/* Preview Summary Card (Section 11 requirement) */}
+            {(() => {
+              const assignedAgent = agents.find((a) => a.id === selectedAgentId);
+              return (
+                <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                      Campaign Summary & Voice Verification
+                    </h3>
+                    <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                      Deterministic Voice Binding
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Campaign</span>
+                      <span className="font-semibold text-slate-900 truncate block mt-0.5">{name || "Untitled Campaign"}</span>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Assigned Agent</span>
+                      <span className="font-semibold text-slate-900 truncate block mt-0.5">{assignedAgent?.name || selectedAgentId}</span>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Voice</span>
+                      <span className="font-semibold text-emerald-800 truncate block mt-0.5" title={assignedAgent?.cartesiaVoiceId}>
+                        {assignedAgent?.cartesiaVoiceName || "Cartesia Voice"}
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400 truncate block">{assignedAgent?.cartesiaVoiceId || ""}</span>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Language</span>
+                      <span className="font-semibold text-slate-900 truncate block mt-0.5">{assignedAgent?.language || "Telugu"}</span>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Contacts Count</span>
+                      <span className="font-semibold text-slate-900 truncate block mt-0.5">
+                        {skipInvalid ? validCount : previews.length} Calls
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Mapped Variables</span>
+                      <span className="font-semibold text-slate-900 truncate block mt-0.5" title={mapping.customDataColumns.join(", ")}>
+                        {mapping.nameColumn ? `Name, Phone` : ""}{mapping.customDataColumns.length > 0 ? `, ${mapping.customDataColumns.join(", ")}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Validation Statistics Pill Strip */}
             <div className="grid grid-cols-3 gap-3">
