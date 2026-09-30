@@ -10,6 +10,7 @@ import {
 import { dataStore, CallItem } from "@/lib/db/store";
 import { CallDirection, CallStatus, MessageRole } from "@/lib/types/models";
 import { sanitizePhoneNumber } from "./sheetParser";
+import { validateCampaignStartConditions, buildIsolatedLeadContext } from "./campaignValidator";
 
 class CampaignManager {
   private campaigns: Map<string, Campaign> = new Map();
@@ -391,11 +392,21 @@ class CampaignManager {
   }): Campaign {
     const id = `CMP-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
-    // Resolve agent details
-    const agent = dataStore.getAgent(params.agentId) || dataStore.getAgents()[0];
-    const agentName = agent?.name || "Harika (Telugu Faculty Voice)";
-    const agentVoice = agent?.cartesiaVoiceName || "Sonic-3.6 (Harika)";
-    const agentLanguage = agent?.language || "Telugu + English";
+    // Resolve agent details — strict, no silent fallback (ISO-3 fix)
+    if (!params.agentId || !params.agentId.trim()) {
+      throw new Error("Campaign creation requires a valid agentId. No agent was specified.");
+    }
+    const agent = dataStore.getAgent(params.agentId);
+    if (!agent) {
+      throw new Error(
+        `Campaign creation failed: Agent "${params.agentId}" was not found. ` +
+        `Please select a valid, active agent before creating a campaign. ` +
+        `Do not use another agent as a substitute.`
+      );
+    }
+    const agentName = agent.name;
+    const agentVoice = agent.cartesiaVoiceName || "Sonic-3.6";
+    const agentLanguage = agent.language || "TELUGU_ENGLISH";
 
     const concurrency = Math.min(10, Math.max(1, params.concurrency || 2));
     const maxRetries = Math.min(5, Math.max(0, params.maxRetries ?? 2));
@@ -438,7 +449,7 @@ class CampaignManager {
       id,
       name: params.name.trim(),
       description: params.description?.trim(),
-      agentId: params.agentId || agent?.id || "agent_vDCfnuFdJokXJDVxgmHeZx",
+      agentId: agent.id, // Always use the validated agent — no hardcoded fallback IDs
       agentName,
       agentVoice,
       agentLanguage,
@@ -487,7 +498,7 @@ class CampaignManager {
 
   // ─── Queue Control: Start, Pause, Resume, Stop ──────────────────────────────
 
-  public startCampaign(id: string): { success: boolean; message: string; campaign?: Campaign } {
+  public startCampaign(id: string): { success: boolean; message: string; campaign?: Campaign; validationErrors?: string[]; validationWarnings?: string[] } {
     const campaign = this.campaigns.get(id);
     if (!campaign) {
       return { success: false, message: "Campaign not found" };
@@ -496,6 +507,32 @@ class CampaignManager {
     if (campaign.status === "RUNNING") {
       return { success: true, message: "Campaign is already running", campaign };
     }
+
+    // ── PRE-FLIGHT VALIDATION (Rule #5) ─────────────────────────────────────────
+    // Run all 10 checks before allowing the campaign to start.
+    // This prevents campaigns with missing/wrong configuration from running silently.
+    const validation = validateCampaignStartConditions(campaign);
+    if (!validation.valid) {
+      console.error(
+        `[CAMPAIGN_START_BLOCKED] Campaign "${campaign.name}" (${id}) failed pre-flight validation:\n` +
+        validation.errors.map((e) => `  ✗ ${e}`).join("\n")
+      );
+      // Do NOT silently start the campaign — surface the errors
+      return {
+        success: false,
+        message: `Campaign cannot start: ${validation.errors[0]}`,
+        campaign,
+        validationErrors: validation.errors,
+        validationWarnings: validation.warnings,
+      };
+    }
+    if (validation.warnings.length > 0) {
+      console.warn(
+        `[CAMPAIGN_START_WARNINGS] Campaign "${campaign.name}" has ${validation.warnings.length} warning(s):\n` +
+        validation.warnings.map((w) => `  ⚠ ${w}`).join("\n")
+      );
+    }
+    // ── END PRE-FLIGHT VALIDATION ────────────────────────────────────────────────
 
     // If campaign was previously completed, or all contacts finished:
     // Auto-reset contacts so the campaign can be re-run one by one!
@@ -545,8 +582,14 @@ class CampaignManager {
     // Start worker loop
     this.launchWorker(id);
 
-    return { success: true, message: "Campaign started successfully", campaign };
+    return {
+      success: true,
+      message: "Campaign started successfully",
+      campaign,
+      validationWarnings: validation.warnings.length > 0 ? validation.warnings : undefined,
+    };
   }
+
 
   public restartCampaign(id: string): { success: boolean; message: string; campaign?: Campaign } {
     const campaign = this.campaigns.get(id);
@@ -769,23 +812,20 @@ class CampaignManager {
       this.recomputeMetrics(campaign);
 
       console.log(
-        `[CAMPAIGN_DISPATCH] Dialing ${contact.name} (${contact.phoneNumber}) via Agent ${campaign.agentName}`
+        `[CAMPAIGN_DISPATCH] campaign=${campaign.id} agent=${campaign.agentId} contact=${contact.id} ` +
+        `name="${contact.name}" phone=${contact.phoneNumber}`
       );
 
-      // Construct business context for the agent with custom data
-      const customNotes = Object.entries(contact.customData || {})
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(", ");
+      // Rule #8: Build isolated per-lead context — ONLY this lead's variables
+      // This is the enforcement point that prevents lead data from one call leaking into another
+      const leadContext = buildIsolatedLeadContext(campaign, contact.id);
+      if (!leadContext) {
+        // Contact not found in this campaign — data integrity error, do not use any other lead
+        this.handleCallFailure(campaign, contact, `[LEAD_ISOLATION_ERROR] Contact ${contact.id} not found in campaign ${campaign.id}. Call aborted.`);
+        return;
+      }
 
-      const businessContext = [
-        `Campaign: ${campaign.name}`,
-        `Customer Name: ${contact.name}`,
-        `Phone: ${contact.phoneNumber}`,
-        `Language: ${contact.language}`,
-        customNotes ? `Customer Data: ${customNotes}` : "",
-      ]
-        .filter(Boolean)
-        .join(" | ");
+      const businessContext = leadContext.businessContext;
 
       // Direct in-process invocation to real telephony dialer without HTTP loopback dependencies
       let callId = `call_camp_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
@@ -797,7 +837,7 @@ class CampaignManager {
         const { dispatchOutboundCall } = await import("@/lib/telephony/outboundDialer");
         const dialerResult = await dispatchOutboundCall({
           to: contact.phoneNumber,
-          agentId: campaign.agentId,
+          agentId: campaign.agentId,  // Always use campaign's specific agentId — no fallback
           businessContext,
           campaignId: campaign.id,
           contactId: contact.id,
@@ -807,8 +847,14 @@ class CampaignManager {
         if (dialerResult.vobizCallId) vobizCallId = dialerResult.vobizCallId;
         telephonyStatus = dialerResult.telephonyStatus;
         cartesiaDispatched = dialerResult.cartesiaDispatched;
+
+        // If dialer explicitly failed with an agent-not-found error, fail this contact
+        if (!dialerResult.success && dialerResult.error?.includes("Agent")) {
+          this.handleCallFailure(campaign, contact, dialerResult.telephonyReason || dialerResult.error);
+          return;
+        }
       } catch (dialErr) {
-        console.warn("[CAMPAIGN_DIALER] Direct dialer call fallback:", dialErr);
+        console.warn("[CAMPAIGN_DIALER] Direct dialer call exception:", dialErr);
       }
 
       contact.callId = callId;

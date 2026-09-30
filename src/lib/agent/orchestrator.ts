@@ -267,18 +267,27 @@ export class AgentOrchestrator {
     const needsTools = isOrderQuery || hasDigits || historyHasOrderFlow || isBookingQuery || isTransferQuery || isEndCallQuery;
 
     let toolsToSend: ToolDefinition[] | undefined = undefined;
-    if (needsTools && activeTools.length > 0) {
+    if (activeTools.length > 0) {
+      const specificTools: ToolDefinition[] = [];
       if (isOrderQuery || hasDigits || historyHasOrderFlow) {
-        toolsToSend = activeTools.filter((t) => t.function.name === "get_order_status" || t.function.name === "check_order_status");
-      } else if (isBookingQuery) {
-        toolsToSend = activeTools.filter((t) => t.function.name === "book_appointment" || t.function.name === "check_availability");
-      } else if (isTransferQuery) {
-        toolsToSend = activeTools.filter((t) => t.function.name === "transfer_call");
-      } else if (isEndCallQuery) {
-        toolsToSend = activeTools.filter((t) => t.function.name === "end_call");
+        specificTools.push(...activeTools.filter((t) => t.function.name === "get_order_status" || t.function.name === "check_order_status"));
       }
-      if (!toolsToSend || toolsToSend.length === 0) {
-        toolsToSend = activeTools.slice(0, 2);
+      if (isBookingQuery) {
+        specificTools.push(...activeTools.filter((t) => t.function.name === "book_appointment" || t.function.name === "check_availability"));
+      }
+      if (isTransferQuery) {
+        specificTools.push(...activeTools.filter((t) => t.function.name === "transfer_call"));
+      }
+      // Always include end_call if available so agent can naturally conclude calls
+      const endCallTool = activeTools.find((t) => t.function.name === "end_call");
+      if (endCallTool && !specificTools.some((t) => t.function.name === "end_call")) {
+        specificTools.push(endCallTool);
+      }
+
+      if (specificTools.length > 0) {
+        toolsToSend = specificTools;
+      } else if (needsTools) {
+        toolsToSend = activeTools.slice(0, 3);
       }
     }
 

@@ -121,3 +121,58 @@ export async function GET(
   return NextResponse.json({ success: true, call });
 }
 
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const { reason = "conversation_completed", context, audioWaitMs = 0 } = body;
+
+    const { endCall, isValidCallStateTransition } = await import("@/lib/telephony/hangupController");
+
+    // Check existing call status in dataStore or DB
+    const existingCall = dataStore.getCall(id);
+    if (existingCall) {
+      if (!isValidCallStateTransition(existingCall.status, CallStatus.ENDING)) {
+        console.warn(`[END_CALL_INVALID_STATE] Cannot transition call ${id} from ${existingCall.status} to ENDING`);
+        return NextResponse.json({
+          success: true,
+          status: existingCall.status,
+          idempotent: true,
+          message: `Call is already in terminal state ${existingCall.status}`,
+        });
+      }
+    }
+
+    const result = await endCall({
+      callId: id,
+      reason,
+      context,
+      audioDurationMs: audioWaitMs,
+      vobizCallId: existingCall?.vobizCallId,
+    });
+
+    if (!result.success) {
+      return NextResponse.json(
+        { success: false, error: result.error, reason: result.reason },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      status: result.status,
+      idempotent: Boolean(result.idempotent),
+      reason: result.reason,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: err.message || "Failed to terminate call" },
+      { status: 500 }
+    );
+  }
+}
+
+

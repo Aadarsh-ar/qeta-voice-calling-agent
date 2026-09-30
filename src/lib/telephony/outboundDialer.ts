@@ -11,8 +11,8 @@ import { dataStore, CallItem } from "@/lib/db/store";
 import { CallDirection, CallStatus, MessageRole } from "@/lib/types/models";
 import { getTelephonyConfig, resolveWebhookBaseUrl } from "@/lib/config/telephony";
 
-// In-memory latency optimization caches to skip redundant HTTP fetches
-let cachedFromNumberId: string | null = null;
+// Per-agent phone number ID cache — avoids sharing phone number IDs across agents/orgs (ISO-5 fix)
+const cachedFromNumberIds = new Map<string, string>();
 let lastSyncedPrompt: string | null = null;
 
 export interface OutboundCallParams {
@@ -89,6 +89,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   let agent = params.agentId ? dataStore.getAgent(params.agentId) : dataStore.getAgents()[0];
   const targetAgentId = params.agentId || agent?.id || telConfig.cartesiaAgentId;
 
+  // ISO-2 fix: Fail explicitly if specified agent is not found — never silently substitute another agent
   if (!agent) {
     try {
       const { prisma } = await import("@/lib/db/prisma");
@@ -107,14 +108,14 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
           status: dbAgent.status as any,
           systemPrompt: dbAgent.systemPrompt,
           businessContext: dbAgent.businessContext || "",
-          cartesiaAgentId: dbAgent.cartesiaAgentId || telConfig.cartesiaAgentId,
-          cartesiaVoiceId: dbAgent.cartesiaVoiceId || telConfig.cartesiaVoiceId,
-          cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
+          cartesiaAgentId: dbAgent.cartesiaAgentId ?? undefined,
+          cartesiaVoiceId: dbAgent.cartesiaVoiceId ?? "",  // Required string in AgentItem
+          cartesiaVoiceName: dbAgent.cartesiaVoiceId ? "Configured Voice" : "Default Voice",
           cartesiaModel: dbAgent.cartesiaModel,
           llmModel: dbAgent.llmModel,
           sarvamModel: dbAgent.sarvamModel,
           sarvamLanguage: dbAgent.sarvamLanguage,
-          phoneNumber: telConfig.vobizPhoneNumber,
+          phoneNumber: undefined,
           callsCount: 0,
           totalMinutes: 0,
           estimatedCost: 0,
@@ -126,48 +127,65 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
             isEnabled: t.isEnabled,
           })),
         };
-        dataStore.createAgentWithId(agent);
+        if (agent) {
+          dataStore.createAgentWithId(agent);
+        }
       }
     } catch (dbErr) {
       console.warn("[OUTBOUND_DIALER] Could not query DB for agent:", dbErr);
     }
   }
 
+  // ISO-2 fix: Never silently substitute another agent. If agentId was specified and agent is still not found, fail.
   if (!agent) {
-    agent = {
-      id: targetAgentId || "agent_vDCfnuFdJokXJDVxgmHeZx",
-      name: "Harika (Telugu Faculty Voice)",
-      description: "Autonomous Voice Calling Agent",
-      language: "TELUGU_ENGLISH" as any,
-      status: "ACTIVE" as any,
-      systemPrompt: "మీరు QETADOTIN AI వాయిస్ అసిస్టెంట్. 1-2 వాక్యాలలో సహజమైన తెలుగు లేదా టెంగ్లీష్ లో మాట్లాడండి.",
-      businessContext: params.businessContext || "QETADOTIN Realtime Voice SaaS",
-      cartesiaAgentId: telConfig.cartesiaAgentId,
-      cartesiaVoiceId: telConfig.cartesiaVoiceId,
-      cartesiaVoiceName: "Harika (Telugu Faculty Voice)",
-      cartesiaModel: "sonic-3.6",
-      llmModel: telConfig.groqApiKey ? "qwen/qwen3.8-27b" : "gemini-2.5-flash",
-      sarvamModel: "saaras:v3-realtime",
-      sarvamLanguage: "te-IN",
-      phoneNumber: telConfig.vobizPhoneNumber,
-      callsCount: 0,
-      totalMinutes: 0,
-      estimatedCost: 0,
-      lastActive: "Active",
-      createdAt: new Date().toISOString(),
-      tools: [],
+    if (params.agentId) {
+      return {
+        success: false,
+        callId: "",
+        vobizCallId: "",
+        telephonyStatus: "FAILED",
+        telephonyReason: `Agent "${params.agentId}" was not found. Cannot dispatch call with an unknown agent configuration. No substitute agent will be used.`,
+        cartesiaDispatched: false,
+        livekitDispatched: false,
+        error: `Agent not found: ${params.agentId}`,
+      };
+    }
+    // No agentId specified and no default agent — fail
+    return {
+      success: false,
+      callId: "",
+      vobizCallId: "",
+      telephonyStatus: "FAILED",
+      telephonyReason: "No agent configured. Cannot dispatch call without a valid agent configuration.",
+      cartesiaDispatched: false,
+      livekitDispatched: false,
+      error: "No agent available",
     };
-    dataStore.createAgentWithId(agent);
   }
 
   const cartesiaApiKey = telConfig.cartesiaApiKey;
-  // Resolve target Cartesia agent ID strictly for the requested agent
+  // Resolve target Cartesia agent ID strictly for the requested agent — no hardcoded global fallback (ISO-2 fix)
   const cartesiaAgentId =
     (agent.cartesiaAgentId && agent.cartesiaAgentId.startsWith("agent_")
       ? agent.cartesiaAgentId
       : agent.id && agent.id.startsWith("agent_")
       ? agent.id
-      : telConfig.cartesiaAgentId) || "agent_vDCfnuFdJokXJDVxgmHeZx";
+      : undefined);
+
+  if (!cartesiaAgentId) {
+    const errMsg = `Agent "${agent.name}" (${agent.id}) does not have a valid Cartesia Agent ID configured. Cannot make an outbound call without a provider agent ID.`;
+    console.error(`[OUTBOUND_DIALER] ${errMsg}`);
+    return {
+      success: false,
+      callId: `call_${Date.now()}`,
+      vobizCallId: "",
+      telephonyStatus: "FAILED",
+      telephonyReason: errMsg,
+      cartesiaDispatched: false,
+      livekitDispatched: false,
+      error: errMsg,
+    };
+  }
 
   const resolvedAgentId = agent.id;
   const agentName = agent.name;
@@ -186,9 +204,9 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   // campaigns, ensuring ZERO disturbances or prompt clobbering under heavy traffic.
   if (cartesiaApiKey && cartesiaAgentId) {
     try {
-      // Latency Optimization: Use cached fromNumberId to save ~250ms roundtrip per call
-      let fromNumberId = cachedFromNumberId || "ap_qXvGsN8xnFH3giNBsQ8QBM";
-      if (!cachedFromNumberId) {
+      // Use per-agent phone number ID cache to avoid sharing phone IDs across agents/orgs (ISO-5 fix)
+      let fromNumberId = cachedFromNumberIds.get(cartesiaAgentId) || "ap_qXvGsN8xnFH3giNBsQ8QBM";
+      if (!cachedFromNumberIds.has(cartesiaAgentId)) {
         try {
           const pnRes = await fetch("https://api.cartesia.ai/agents/phone-numbers", {
             headers: {
@@ -203,7 +221,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
             );
             if (matching?.id) {
               fromNumberId = matching.id;
-              cachedFromNumberId = matching.id;
+              cachedFromNumberIds.set(cartesiaAgentId, matching.id);
             }
           }
         } catch {}
@@ -325,16 +343,17 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
 
   dataStore.addCall(newCall);
 
-  // Best-effort persist into Neon PostgreSQL
+  // Best-effort persist into Neon PostgreSQL — scoped to agent's organization (DATA-3 fix)
   try {
     const { prisma } = await import("@/lib/db/prisma");
-    const org = await prisma.organization.findFirst();
-    if (org) {
+    // Use agent's organizationId directly — never assume a single org or findFirst()
+    const agentOrgId = (agent as any).organizationId;
+    if (agentOrgId) {
       await prisma.call.create({
         data: {
           id: callId,
-          organizationId: org.id,
-          agentId: agent?.id,
+          organizationId: agentOrgId,
+          agentId: agent.id,
           vobizCallId,
           callerNumber: cleanNumber,
           agentNumber: outboundCallerId,
@@ -344,8 +363,12 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
           totalCost: 1.5,
         },
       });
+    } else {
+      console.warn(`[OUTBOUND_DIALER] Cannot persist call: agent "${agent.id}" has no organizationId. Skipping DB write.`);
     }
-  } catch {}
+  } catch (dbErr: unknown) {
+    console.warn(`[OUTBOUND_DIALER] Non-fatal: Failed to persist call record to DB:`, dbErr instanceof Error ? dbErr.message : dbErr);
+  }
 
   return {
     success: cartesiaDispatched,

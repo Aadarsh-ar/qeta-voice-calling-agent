@@ -462,21 +462,15 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
           businessContext: true,
         },
       });
-    }
-    if (!dbAgent) {
+      // ISO-2 fix: If a specific agentId was requested but not found, do NOT fall back to any other agent.
+      if (!dbAgent) {
+        console.warn(`[AGENT_NOT_FOUND] getOrPrewarmGreeting: agentId "${agentId}" not found in DB. No cross-agent fallback allowed.`);
+        return { greeting: "", voiceId, agentName, businessName, systemPrompt, audioBuf: null, timestamp: Date.now() };
+      }
+    } else {
+      // No specific agent requested (inbound call routing) — use default/first active agent
       dbAgent = await prisma.agent.findFirst({
         where: { status: "ACTIVE" },
-        select: {
-          name: true,
-          instructions: true,
-          initialMessage: true,
-          systemPrompt: true,
-          cartesiaVoiceId: true,
-          language: true,
-          business: { select: { name: true } },
-          businessContext: true,
-        },
-      }) || await prisma.agent.findFirst({
         select: {
           name: true,
           instructions: true,
@@ -546,15 +540,60 @@ You are on a LIVE, REAL-TIME PHONE CALL with a customer.
 // ─── Centralized Call Termination & Conversation End Controller (Rules 10-15) ─
 const terminatingCalls = new Set();
 
-function endCallServer({ callId, reason, audioWaitMs = 0, disconnectFn }) {
+async function terminateVobizCarrierCall(vobizCallId) {
+  if (!vobizCallId || vobizCallId === "unknown") return false;
+  const authId = process.env.VOBIZ_AUTH_ID || "MA_1YIFMW7C";
+  const authToken = process.env.VOBIZ_AUTH_TOKEN || "lTaYGZRO9Hpj6XRxvVdiirEcY1yBdiypslLbX5dv9ZQHnjvlqUbf8giYH8hbQvtF";
+  try {
+    const url = `https://api.vobiz.ai/api/v1/Account/${authId}/Call/${encodeURIComponent(vobizCallId)}/`;
+    console.log(`[PROVIDER_HANGUP_DISPATCH] Terminating Vobiz carrier call: ${url}`);
+    const res = await fetchWithRetry(
+      url,
+      {
+        method: "DELETE",
+        headers: {
+          "X-Auth-ID": authId,
+          "X-Auth-Token": authToken,
+        },
+      },
+      { timeoutMs: 5000, maxRetries: 1 }
+    );
+    console.log(`[PROVIDER_HANGUP_RESULT] Vobiz status: ${res.status}`);
+    return res.ok || res.status === 404;
+  } catch (err) {
+    console.warn(`[PROVIDER_HANGUP_WARN] Failed to terminate Vobiz call: ${err.message}`);
+    return false;
+  }
+}
+
+function endCallServer({ callId, reason = "conversation_completed", audioWaitMs = 0, disconnectFn, vobizCallId, context }) {
   if (!callId) return;
+
+  // Strict Call Context Validation
+  if (context && context.callId && context.callId !== callId) {
+    console.error(`[END_CALL_SECURITY_ERROR] Context callId "${context.callId}" does not match target call "${callId}". Aborting.`);
+    return;
+  }
+
   if (terminatingCalls.has(callId)) {
     console.log(`[END_CALL_LOCKED] Call ${callId} already terminating. Duplicate skipped.`);
     return;
   }
   terminatingCalls.add(callId);
 
-  const isIntentional = ["USER_ENDED", "AGENT_ENDED", "CONVERSATION_COMPLETED"].includes(reason);
+  const isIntentional = [
+    "user_goodbye",
+    "conversation_completed",
+    "user_requested_hangup",
+    "agent_completed_task",
+    "appointment_completed",
+    "transfer_completed",
+    "campaign_termination",
+    "USER_ENDED",
+    "AGENT_ENDED",
+    "CONVERSATION_COMPLETED",
+  ].includes(reason);
+
   const classification = isIntentional ? "INTENTIONAL_CONVERSATION_END" : "PREMATURE_DISCONNECT";
 
   console.log(`[CALL_TERMINATION_INITIATED] callId=${callId} reason=${reason} classification=${classification} audioWaitMs=${audioWaitMs}`);
@@ -562,15 +601,45 @@ function endCallServer({ callId, reason, audioWaitMs = 0, disconnectFn }) {
   const state = activeCallStates.get(callId);
   if (state) {
     state.active = false;
-    state.stage = "ENDED";
+    state.stage = "ENDING";
   }
 
-  // Ensure audio finishes playing completely before disconnecting line
+  // Ensure final closing audio finishes playing completely before disconnecting line (Two-step termination)
   const delay = Math.max(audioWaitMs, 800);
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
       console.log(`[CALL_TERMINATION_EXECUTING] Dropping line for ${callId} after audio completion (${delay}ms)`);
+
+      // Telephony Provider Hangup
+      if (vobizCallId) {
+        await terminateVobizCarrierCall(vobizCallId);
+      }
+
       if (typeof disconnectFn === "function") disconnectFn();
+
+      if (state) {
+        state.stage = "COMPLETED";
+      }
+
+      // Update Neon PostgreSQL
+      try {
+        const prisma = await getPrismaClient();
+        await prisma.call.updateMany({
+          where: {
+            OR: [
+              { id: callId },
+              ...(vobizCallId ? [{ vobizCallId }] : []),
+            ],
+          },
+          data: {
+            status: isIntentional ? "COMPLETED" : "FAILED",
+            endedAt: new Date(),
+            endReason: reason,
+          },
+        });
+      } catch (dbErr) {
+        console.warn("[END_CALL_DB_WARN]", dbErr.message);
+      }
     } catch (err) {
       console.error(`[CALL_TERMINATION_ERROR] ${err.message}`);
     }
@@ -1349,6 +1418,17 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
   async function processCallerAudio(allAudio) {
     if (!allAudio || allAudio.length === 0 || isProcessing) return;
 
+    // Rule 6: PREVENT CONTINUED CONVERSATION — drop speech input if call is terminating or completed
+    if (terminatingCalls.has(streamId)) {
+      console.log(`[PROCESS_IGNORED] Call ${streamId} is terminating. Dropping speech input.`);
+      return;
+    }
+    const currentCallState = activeCallStates.get(streamId);
+    if (currentCallState && (currentCallState.stage === "ENDING" || currentCallState.stage === "ENDED" || currentCallState.stage === "COMPLETED")) {
+      console.log(`[PROCESS_IGNORED] Call ${streamId} is in stage "${currentCallState.stage}". Dropping speech input.`);
+      return;
+    }
+
     hasLoggedFirstAudio = false;
 
     // Skip brief noise / clicks (< 0.4s)
@@ -1441,8 +1521,10 @@ function handleVobizStream(ws, queryAgentId, queryCallerNumber = "+916305367443"
         if (shouldEndCall) {
           endCallServer({
             callId: streamId,
-            reason: "CONVERSATION_COMPLETED",
+            reason: "conversation_completed",
             audioWaitMs: durationMs + 800,
+            vobizCallId: callUuid,
+            context: { callId: streamId, agentId: queryAgentId },
             disconnectFn: () => {
               console.log("[LATENCY_TRACE] CALL_ENDED → Turn finished and audio completed. Closing stream.");
               try { ws.close(1000, "Call finished"); } catch {}

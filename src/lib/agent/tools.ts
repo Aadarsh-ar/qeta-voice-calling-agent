@@ -247,16 +247,20 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "end_call",
-      description: "Conclude the phone call when conversation is finished or caller says goodbye.",
+      description: "Ends the current call when the conversation is completed.",
       parameters: {
         type: "object",
         properties: {
+          reason: {
+            type: "string",
+            description: "The reason for ending the call. Possible values: user_goodbye, conversation_completed, user_requested_hangup, agent_completed_task, appointment_completed, transfer_completed, campaign_termination, system_error",
+          },
           closingMessage: {
             type: "string",
-            description: "Polite sign-off in Telugu/Tenglish to speak before terminating call",
+            description: "Optional short polite closing sentence spoken to the user before terminating the call",
           },
         },
-        required: ["closingMessage"],
+        required: ["reason"],
       },
     },
   },
@@ -463,11 +467,14 @@ export async function executeToolCall(
     }
 
     case "end_call": {
-      const closing = String(args.closingMessage || "మాతో మాట్లాడినందుకు చాలా ధన్యవాదాలు అండి. హావ్ ఎ వండర్‌ఫుల్ డే!");
+      const reason = String(args.reason || "conversation_completed");
+      const defaultClosing = "మాతో మాట్లాడినందుకు చాలా ధన్యవాదాలు అండి. హావ్ ఎ గ్రేట్ డే, బై!";
+      const closing = String(args.closingMessage || defaultClosing);
       return {
         success: true,
         result: {
           status: "concluded",
+          reason,
           closingMessage: closing,
         },
         conversationalSummaryTelugu: closing,

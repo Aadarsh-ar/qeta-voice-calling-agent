@@ -3,17 +3,24 @@ import { dataStore } from "@/lib/db/store";
 import { AgentLanguage, AgentStatus } from "@/lib/types/models";
 import { syncAgentWithCartesia } from "@/lib/cartesia/sync";
 import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
+import { resolveOrgContext } from "@/lib/auth/orgContext";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const dbPromise = (async () => {
       try {
         const { prisma } = await import("@/lib/db/prisma");
-        const org = await prisma.organization.findFirst({ select: { id: true } });
-        const organizationId = org?.id;
+        // ISO-1 fix: resolve org from request context, not findFirst()
+        const orgResult = await resolveOrgContext(req);
+        let orgFilter: { organizationId?: string } = {};
+        if ("error" in orgResult) {
+          console.warn(`[AGENTS_GET] Org resolution warning: ${orgResult.error} — using unscoped query (single-org compat)`);
+        } else {
+          orgFilter = { organizationId: orgResult.organizationId };
+        }
 
         return await prisma.agent.findMany({
-          where: organizationId ? { organizationId } : undefined,
+          where: orgFilter,
           select: {
             id: true,
             organizationId: true,
@@ -53,6 +60,7 @@ export async function GET() {
         return [];
       }
     })().catch(() => []);
+
 
     const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1000));
     const dbAgents = (await Promise.race([dbPromise, timeoutPromise])) || [];
@@ -278,12 +286,18 @@ export async function POST(req: Request) {
 
     const verifiedCartesiaAgentId = syncResult.cartesiaAgentId;
 
-    // ── STEP 2: Persist in PostgreSQL (Scoped by organizationId) ──────────────
+    // ── STEP 2: Persist in PostgreSQL (Scoped by organizationId via request context) ──
     const { prisma } = await import("@/lib/db/prisma");
-    const org = await prisma.organization.findFirst();
-    if (!org) {
-      return NextResponse.json({ success: false, error: "No organization found" }, { status: 400 });
+    // ISO-1 fix: use resolveOrgContext instead of findFirst() to correctly scope to calling org
+    const orgResult = await resolveOrgContext(req);
+    if ("error" in orgResult) {
+      return NextResponse.json(
+        { success: false, error: `Organization context error: ${orgResult.error}` },
+        { status: 400 }
+      );
     }
+    const orgId = orgResult.organizationId;
+
 
     // Find phone number record if provided
     const phoneToAssign = phoneNumber || "+91 80 7158 2667";
@@ -296,7 +310,7 @@ export async function POST(req: Request) {
     if (bizProfile.businessName) {
       businessRecord = await prisma.business.create({
         data: {
-          organizationId: org.id,
+          organizationId: orgId,
           name: bizProfile.businessName,
           description: bizProfile.description || "",
           information: bizProfile.productsServices || "",
@@ -310,7 +324,7 @@ export async function POST(req: Request) {
 
     const createdAgent = await prisma.agent.create({
       data: {
-        organizationId: org.id,
+        organizationId: orgId,
         name: name.trim(),
         description: description || "",
         instructions: agentInstructions,
@@ -390,7 +404,7 @@ export async function POST(req: Request) {
 
     agentRuntimeCache.invalidate(createdAgent.id, {
       id: createdAgent.id,
-      organizationId: org.id,
+      organizationId: orgId,
       name: createdAgent.name,
       instructions: agentInstructions,
       businessName: bizProfile.businessName || "QETADOTIN",

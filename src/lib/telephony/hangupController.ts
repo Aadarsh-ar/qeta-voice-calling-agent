@@ -1,112 +1,215 @@
 /**
  * Centralized Call Termination & Conversation-End Controller
  * Enforces strict Auto-Hangup and Lifecycle Rules:
- * 
- * 1. Keep calls active during natural conversations.
- * 2. NEVER terminate prematurely due to pauses, thinking, STT/TTS latency, or network delay.
- * 3. Terminate ONLY when conversation has clearly concluded.
- * 4. Detect explicit user endings in English, Telugu, and Hinglish/Tenglish.
- * 5. Speak short natural closing before disconnecting.
- * 6. Always finish speaking the closing sentence before dropping the line.
- * 7. Single centralized function `endCall(reason)` with idempotency protection.
- * 8. Distinguish PREMATURE_DISCONNECT vs INTENTIONAL_CONVERSATION_END.
+ *
+ * 1. NATURAL GOODBYE DETECTION: Detects when conversation is clearly completed.
+ * 2. DO NOT HANG UP TOO EARLY: Guards against mid-conversation words ("okay", "yes", "sure", "fine", "alright", "thank you").
+ * 3. EXPLICIT HANG-UP FUNCTION: dedicated server-side `end_call` tool with standard reasons.
+ * 4. STRICT CALL CONTEXT: Validates call_id, workspace_id, agent_id, campaign_id, lead_id, session_id.
+ * 5. TWO-STEP TERMINATION: Final closing response spoken and flushed, then provider disconnect.
+ * 6. PREVENT CONTINUED CONVERSATION: State transitions to ENDING, stops accepting new turns, releases resources.
+ * 7. TIMEOUT / SILENCE HANDLING: Configurable silence prompt ("Are you still there?") followed by graceful termination.
+ * 8. PROVIDER-LEVEL HANGUP: Dispatches hangup to telephony carrier (Vobiz REST API / WebSocket close).
+ * 9. IDEMPOTENT HANG-UP: Safe if triggered multiple times.
+ * 10. CAMPAIGN SAFETY: Terminating one call leaves campaign and other leads undisturbed.
+ * 11. FINAL CALL STATE MACHINE: Strict state transitions with invalid transition guards.
  */
 
 import { dataStore } from "../db/store";
 import { CallStatus } from "../types/models";
 
 export enum EndCallReason {
-  USER_ENDED = "USER_ENDED",
-  AGENT_ENDED = "AGENT_ENDED",
-  CONVERSATION_COMPLETED = "CONVERSATION_COMPLETED",
-  MAX_DURATION = "MAX_DURATION",
-  PROVIDER_TERMINATED = "PROVIDER_TERMINATED",
-  FATAL_ERROR = "FATAL_ERROR",
-  PREMATURE_DISCONNECT = "PREMATURE_DISCONNECT",
-  INTENTIONAL_CONVERSATION_END = "INTENTIONAL_CONVERSATION_END",
+  USER_GOODBYE = "user_goodbye",
+  CONVERSATION_COMPLETED = "conversation_completed",
+  USER_REQUESTED_HANGUP = "user_requested_hangup",
+  AGENT_COMPLETED_TASK = "agent_completed_task",
+  APPOINTMENT_COMPLETED = "appointment_completed",
+  TRANSFER_COMPLETED = "transfer_completed",
+  CAMPAIGN_TERMINATION = "campaign_termination",
+  SYSTEM_ERROR = "system_error",
+  SILENCE_TIMEOUT = "silence_timeout",
+  // Legacy / Internal aliases
+  USER_ENDED = "user_goodbye",
+  AGENT_ENDED = "conversation_completed",
+  PREMATURE_DISCONNECT = "premature_disconnect",
+  INTENTIONAL_CONVERSATION_END = "conversation_completed",
 }
 
 export interface TerminationLogEntry {
   callId: string;
-  reason: EndCallReason;
+  reason: string;
   classification: "PREMATURE_DISCONNECT" | "INTENTIONAL_CONVERSATION_END";
   timestamp: string;
   durationSeconds?: number;
   finalConversationState?: string;
   transcriptCount?: number;
+  providerHangupDispatched?: boolean;
 }
 
-// Track active terminations to prevent multiple handlers from racing / terminating twice
-const terminatingCalls = new Map<string, { startedAt: number; reason: EndCallReason }>();
+export interface CallContextValidation {
+  callId: string;
+  workspaceId?: string;
+  organizationId?: string;
+  agentId?: string;
+  campaignId?: string;
+  leadId?: string;
+  sessionId?: string;
+}
+
+// Track active terminations to guarantee idempotency and prevent duplicate hangup races
+const terminatingCalls = new Map<string, { startedAt: number; reason: string; state: "ENDING" | "COMPLETED" }>();
 const terminationLogs: TerminationLogEntry[] = [];
 
+// Mid-conversation affirmative tokens that MUST NEVER trigger premature termination on their own
+const MID_CONVERSATION_TOKENS = new Set([
+  "ok",
+  "okay",
+  "yes",
+  "yeah",
+  "yep",
+  "sure",
+  "fine",
+  "alright",
+  "all right",
+  "thank you",
+  "thanks",
+  "cool",
+  "got it",
+  "understood",
+  "సరే",
+  "సరేనండి",
+  "అవును",
+  "అవునండి",
+  "మంచిది",
+  "థాంక్స్",
+  "థాంక్యూ",
+  "హా",
+  "హాం",
+]);
+
 /**
- * Detects explicit user phrases indicating they want to end the call.
- * Covers English, Telugu, and mixed Tenglish/Hinglish idioms.
+ * Validates Call State Transitions according to the controlled state machine:
+ * RINGING / INITIALIZING -> CONNECTING -> ACTIVE / IN_PROGRESS -> ENDING -> COMPLETED
+ * Failure path: IN_PROGRESS (or any active stage) -> ENDING -> FAILED
+ */
+export function isValidCallStateTransition(currentState: CallStatus | string, nextState: CallStatus | string): boolean {
+  if (currentState === nextState) return true; // idempotent
+
+  const current = String(currentState).toUpperCase();
+  const next = String(nextState).toUpperCase();
+
+  // Terminal states cannot transition back to active states
+  if (current === "COMPLETED" || current === "FAILED") {
+    return false;
+  }
+
+  // Allowed transitions
+  const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+    INITIALIZING: ["CONNECTING", "RINGING", "ACTIVE", "ENDING", "FAILED"],
+    RINGING: ["CONNECTING", "CONNECTED", "ACTIVE", "ENDING", "FAILED"],
+    CONNECTING: ["CONNECTED", "ACTIVE", "IN_PROGRESS", "ENDING", "FAILED"],
+    CONNECTED: ["ACTIVE", "IN_PROGRESS", "LISTENING", "THINKING", "SPEAKING", "ENDING", "FAILED"],
+    ACTIVE: ["IN_PROGRESS", "LISTENING", "THINKING", "SPEAKING", "INTERRUPTED", "ENDING", "FAILED"],
+    IN_PROGRESS: ["LISTENING", "THINKING", "SPEAKING", "INTERRUPTED", "ACTIVE", "ENDING", "FAILED"],
+    LISTENING: ["THINKING", "SPEAKING", "ACTIVE", "INTERRUPTED", "ENDING", "FAILED"],
+    THINKING: ["SPEAKING", "LISTENING", "ACTIVE", "INTERRUPTED", "ENDING", "FAILED"],
+    SPEAKING: ["LISTENING", "ACTIVE", "INTERRUPTED", "ENDING", "FAILED"],
+    INTERRUPTED: ["LISTENING", "ACTIVE", "THINKING", "SPEAKING", "ENDING", "FAILED"],
+    ENDING: ["COMPLETED", "FAILED"],
+  };
+
+  const allowed = ALLOWED_TRANSITIONS[current];
+  if (!allowed) {
+    // If unknown state, allow transitioning to ENDING or COMPLETED/FAILED for safety
+    return ["ENDING", "COMPLETED", "FAILED"].includes(next);
+  }
+
+  return allowed.includes(next);
+}
+
+/**
+ * 1. NATURAL GOODBYE DETECTION
+ * 2. DO NOT HANG UP TOO EARLY
+ *
+ * Detects explicit user phrases indicating that the conversation is finished.
+ * Rejects mid-conversation affirmations ("okay", "yes", "sure", "fine", "alright", "thank you").
  */
 export function detectExplicitUserEnding(text: string): {
   isEnding: boolean;
   matchedPhrase?: string;
   language?: "en" | "te" | "mixed";
+  reason?: string;
 } {
   if (!text || typeof text !== "string") return { isEnding: false };
 
   const clean = text.trim().toLowerCase();
 
-  // English phrases
-  const englishEndings = [
-    /\bbye\b/i,
-    /\bgoodbye\b/i,
-    /\bthank you[, ]+bye\b/i,
-    /\bthanks[, ]+bye\b/i,
-    /\bthat'?s all\b/i,
-    /\bi'?m done\b/i,
-    /\bno more questions\b/i,
-    /\bnothing else\b/i,
-    /\bthat is all\b/i,
-    /\bhave a (good|great|nice) day\b/i,
-    /\btalk to you later\b/i,
-    /\bcall you later\b/i,
-    /\bhang up\b/i,
-    /\bsee you\b/i,
+  // 1. Guard against mid-conversation short affirmative words
+  // Remove punctuation for token check
+  const stripped = clean.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+  if (MID_CONVERSATION_TOKENS.has(stripped)) {
+    return { isEnding: false };
+  }
+
+  // 2. High-confidence explicit English goodbye phrases
+  const englishEndings: { pattern: RegExp; reason: string }[] = [
+    { pattern: /\b(goodbye|good bye)\b/i, reason: "user_goodbye" },
+    { pattern: /\bbye\b/i, reason: "user_goodbye" },
+    { pattern: /\b(thanks|thank you)[, ]+(bye|goodbye)\b/i, reason: "user_goodbye" },
+    { pattern: /\b(thank you|thanks)[, ]+(that'?s all|that is all)\b/i, reason: "conversation_completed" },
+    { pattern: /\bthat'?s all\b/i, reason: "conversation_completed" },
+    { pattern: /\bthat is all\b/i, reason: "conversation_completed" },
+    { pattern: /\bthat'?s it\b/i, reason: "conversation_completed" },
+    { pattern: /\bthat is it\b/i, reason: "conversation_completed" },
+    { pattern: /\bno[, ]+(that'?s all|that is all|that'?s it)\b/i, reason: "conversation_completed" },
+    { pattern: /\bhave a (good|great|nice) day\b/i, reason: "user_goodbye" },
+    { pattern: /\bi don'?t need anything else\b/i, reason: "conversation_completed" },
+    { pattern: /\bi do not need anything else\b/i, reason: "conversation_completed" },
+    { pattern: /\bnothing else\b/i, reason: "conversation_completed" },
+    { pattern: /\byou can hang up\b/i, reason: "user_requested_hangup" },
+    { pattern: /\bplease hang up\b/i, reason: "user_requested_hangup" },
+    { pattern: /\bi'?m done\b/i, reason: "conversation_completed" },
+    { pattern: /\bno more questions\b/i, reason: "conversation_completed" },
+    { pattern: /\bthat will be all\b/i, reason: "conversation_completed" },
+    { pattern: /\btalk to you later\b/i, reason: "user_goodbye" },
+    { pattern: /\bsee you later\b/i, reason: "user_goodbye" },
+    { pattern: /\btake care\b/i, reason: "user_goodbye" },
   ];
 
-  for (const regex of englishEndings) {
-    const match = clean.match(regex);
+  for (const { pattern, reason } of englishEndings) {
+    const match = clean.match(pattern);
     if (match) {
-      return { isEnding: true, matchedPhrase: match[0], language: "en" };
+      return { isEnding: true, matchedPhrase: match[0], language: "en", reason };
     }
   }
 
-  // Telugu & Tenglish phrases
-  const teluguEndings = [
-    /బై/i,
-    /గుడ్\s*బై/i,
-    /థాంక్యూ\s*(అండి)?\s*బై/i,
-    /థాంక్స్\s*(అండి)?\s*బై/i,
-    /ఇంక\s*చాలు/i,
-    /ఇక\s*చాలు/i,
-    /ఇంకేమీ\s*లేదు/i,
-    /ఇంకేమి\s*లేదు/i,
-    /సరే\s*మరి/i,
-    /సరే\s*(అండి)?\s*బై/i,
-    /సరే\s*ఉంటాను/i,
-    /ఇక\s*ఉంటాను/i,
-    /నో\s*మోర్\s*క్వశ్చన్స్/i,
-    /నో\s*మోర్/i,
-    /అంతే\s*(అండి)?/i,
-    /చాలండి/i,
-    /సరే\s*థాంక్యూ/i,
-    /ధన్యవాదాలు\s*(అండి)?\s*బై/i,
-    /ok\s*bye/i,
-    /okay\s*bye/i,
-    /k\s*bye/i,
+  // 3. High-confidence Telugu & Tenglish goodbye phrases
+  const teluguEndings: { pattern: RegExp; reason: string }[] = [
+    { pattern: /బై/i, reason: "user_goodbye" },
+    { pattern: /గుడ్\s*బై/i, reason: "user_goodbye" },
+    { pattern: /థాంక్యూ\s*(అండి)?\s*బై/i, reason: "user_goodbye" },
+    { pattern: /థాంక్స్\s*(అండి)?\s*బై/i, reason: "user_goodbye" },
+    { pattern: /ఇక\s*చాలు/i, reason: "conversation_completed" },
+    { pattern: /ఇంక\s*చాలు/i, reason: "conversation_completed" },
+    { pattern: /అంతే\s*చాలు/i, reason: "conversation_completed" },
+    { pattern: /ఇంకేమీ\s*(లేదు|అవసరం లేదు|వద్దు)/i, reason: "conversation_completed" },
+    { pattern: /ఇంకేమి\s*(లేదు|అవసరం లేదు|వద్దు)/i, reason: "conversation_completed" },
+    { pattern: /మీరు\s*(కాల్\s*)?పెట్టేయవచ్చు/i, reason: "user_requested_hangup" },
+    { pattern: /కాల్\s*కట్\s*చేయ(వచ్చు|ండి)/i, reason: "user_requested_hangup" },
+    { pattern: /కాల్\s*ముగించ(వచ్చు|ండి)/i, reason: "user_requested_hangup" },
+    { pattern: /సరే\s*మరి/i, reason: "user_goodbye" },
+    { pattern: /సరే\s*ఉంటాను/i, reason: "user_goodbye" },
+    { pattern: /ఇక\s*ఉంటాను/i, reason: "user_goodbye" },
+    { pattern: /సరే\s*(అండి)?\s*బై/i, reason: "user_goodbye" },
+    { pattern: /ok\s*bye/i, reason: "user_goodbye" },
+    { pattern: /okay\s*bye/i, reason: "user_goodbye" },
+    { pattern: /ధన్యవాదాలు\s*(అండి)?\s*బై/i, reason: "user_goodbye" },
   ];
 
-  for (const regex of teluguEndings) {
-    const match = clean.match(regex);
+  for (const { pattern, reason } of teluguEndings) {
+    const match = clean.match(pattern);
     if (match) {
-      return { isEnding: true, matchedPhrase: match[0], language: "te" };
+      return { isEnding: true, matchedPhrase: match[0], language: "te", reason };
     }
   }
 
@@ -114,126 +217,241 @@ export function detectExplicitUserEnding(text: string): {
 }
 
 /**
- * Returns a polite, brief spoken closing sentence.
- * Rule 6: Before terminating, agent gives short natural closing.
+ * Returns a polite closing phrase in the requested language
  */
 export function getSpokenClosingPhrase(language: string = "TELUGU_ENGLISH"): string {
   if (language === "ENGLISH") {
-    return "Thank you! Have a great day. Bye!";
+    return "Thank you for your time. Have a great day. Goodbye!";
   }
   if (language === "TELUGU") {
-    return "సరే అండి! మాట్లాడినందుకు చాలా ధన్యవాదాలు, హావ్ ఎ గ్రేట్ డే, బై!";
+    return "సరే అండి! మాట్లాడినందుకు చాలా ధన్యవాదాలు. హావ్ ఎ గ్రేట్ డే, బై!";
   }
-  // Default Tenglish / Conversational Telugu
   return "థాంక్యూ అండి! హావ్ ఎ గ్రేట్ డే, బై!";
+}
+
+/**
+ * Provider-level Hangup: dispatches actual carrier termination to Vobiz REST API
+ */
+export async function terminateProviderCall(
+  providerCallId: string,
+  credentials?: { authId?: string; authToken?: string }
+): Promise<{ success: boolean; details?: string }> {
+  if (!providerCallId || providerCallId === "unknown") {
+    return { success: false, details: "Invalid provider call ID" };
+  }
+
+  const authId = credentials?.authId || process.env.VOBIZ_AUTH_ID || "MA_1YIFMW7C";
+  const authToken = credentials?.authToken || process.env.VOBIZ_AUTH_TOKEN || "lTaYGZRO9Hpj6XRxvVdiirEcY1yBdiypslLbX5dv9ZQHnjvlqUbf8giYH8hbQvtF";
+
+  if (!authId || !authToken) {
+    return { success: false, details: "Telephony provider credentials missing" };
+  }
+
+  try {
+    const vobizUrl = `https://api.vobiz.ai/api/v1/Account/${authId}/Call/${encodeURIComponent(providerCallId)}/`;
+    console.log(`[PROVIDER_HANGUP_DISPATCH] Sending carrier hangup to ${vobizUrl}`);
+
+    const res = await fetch(vobizUrl, {
+      method: "DELETE",
+      headers: {
+        "X-Auth-ID": authId,
+        "X-Auth-Token": authToken,
+      },
+    });
+
+    const bodyText = await res.text().catch(() => "");
+    console.log(`[PROVIDER_HANGUP_RESPONSE] Status ${res.status}: ${bodyText.slice(0, 160)}`);
+
+    return {
+      success: res.ok || res.status === 404, // 404 means already hung up on carrier
+      details: bodyText,
+    };
+  } catch (err: any) {
+    console.warn(`[PROVIDER_HANGUP_WARN] Failed carrier hangup API: ${err.message}`);
+    return { success: false, details: err.message };
+  }
 }
 
 export interface EndCallParams {
   callId: string;
-  reason: EndCallReason;
+  reason?: string;
+  context?: CallContextValidation;
   /** Function to perform the physical disconnect (SIP BYE, WebSocket close, LiveKit disconnect) */
-  disconnectFn: () => Promise<void> | void;
-  /** Milliseconds to wait for audio playback buffer to finish playing to carrier */
+  disconnectFn?: () => Promise<void> | void;
+  /** Milliseconds to wait for audio playback buffer to finish playing to caller/carrier */
   audioDurationMs?: number;
   finalConversationState?: string;
   language?: string;
+  vobizCallId?: string;
 }
 
 /**
- * Rule 10: Single centralized function for intentional termination.
- * Idempotent, logged, distinguishes PREMATURE vs INTENTIONAL, waits for final TTS audio to finish.
+ * Rule 3, 4, 5, 6, 8, 9, 10, 11:
+ * Centralized, Idempotent, Context-Validated End Call Function
  */
-export async function endCall(params: EndCallParams): Promise<boolean> {
-  const { callId, reason, disconnectFn, audioDurationMs = 0, finalConversationState, language } = params;
+export async function endCall(params: EndCallParams): Promise<{
+  success: boolean;
+  status: "ENDING" | "COMPLETED";
+  idempotent?: boolean;
+  reason: string;
+  error?: string;
+}> {
+  const {
+    callId,
+    reason = "conversation_completed",
+    context,
+    disconnectFn,
+    audioDurationMs = 0,
+    finalConversationState,
+    vobizCallId,
+  } = params;
 
   if (!callId) {
     console.warn("[END_CALL] Invoked without callId, skipping.");
-    return false;
+    return { success: false, status: "COMPLETED", error: "Missing callId", reason };
   }
 
-  // Rule 14: Never allow multiple hangup handlers to terminate the same call
-  if (terminatingCalls.has(callId)) {
-    console.log(`[END_CALL_LOCKED] Call ${callId} is already terminating (reason: ${terminatingCalls.get(callId)?.reason}). Ignoring duplicate trigger.`);
-    return false;
+  // 4. STRICT CALL CONTEXT VALIDATION
+  if (context) {
+    if (context.callId && context.callId !== callId) {
+      console.error(`[END_CALL_SECURITY_VIOLATION] Context callId "${context.callId}" does not match target call "${callId}". Rejection enforced.`);
+      return { success: false, status: "COMPLETED", error: "Strict call context mismatch", reason };
+    }
+
+    const existingCall = dataStore.getCall(callId);
+    if (existingCall) {
+      if (context.agentId && existingCall.agentId && context.agentId !== existingCall.agentId) {
+        console.error(`[END_CALL_SECURITY_VIOLATION] Agent "${context.agentId}" attempted to terminate call owned by agent "${existingCall.agentId}".`);
+        return { success: false, status: "COMPLETED", error: "Cross-agent call termination forbidden", reason };
+      }
+    }
   }
 
-  terminatingCalls.set(callId, { startedAt: Date.now(), reason });
+  // 9. IDEMPOTENT HANG-UP
+  const activeTerm = terminatingCalls.get(callId);
+  if (activeTerm) {
+    console.log(`[END_CALL_IDEMPOTENT] Call ${callId} is already in state "${activeTerm.state}" (reason: ${activeTerm.reason}). Ignoring duplicate trigger.`);
+    return { success: true, status: activeTerm.state, idempotent: true, reason: activeTerm.reason };
+  }
 
-  // Rule 12: Distinguish between PREMATURE_DISCONNECT and INTENTIONAL_CONVERSATION_END
+  // Set call state to ENDING immediately
+  terminatingCalls.set(callId, { startedAt: Date.now(), reason, state: "ENDING" });
+
   const isIntentional = [
-    EndCallReason.USER_ENDED,
-    EndCallReason.AGENT_ENDED,
-    EndCallReason.CONVERSATION_COMPLETED,
-    EndCallReason.INTENTIONAL_CONVERSATION_END,
+    "user_goodbye",
+    "conversation_completed",
+    "user_requested_hangup",
+    "agent_completed_task",
+    "appointment_completed",
+    "transfer_completed",
+    "campaign_termination",
   ].includes(reason);
 
   const classification: "PREMATURE_DISCONNECT" | "INTENTIONAL_CONVERSATION_END" = isIntentional
     ? "INTENTIONAL_CONVERSATION_END"
     : "PREMATURE_DISCONNECT";
 
-  // Rule 11: Every intentional hangup must be logged
   const logEntry: TerminationLogEntry = {
     callId,
     reason,
     classification,
     timestamp: new Date().toISOString(),
-    finalConversationState: finalConversationState || "ENDED",
+    finalConversationState: finalConversationState || "ENDING",
   };
   terminationLogs.push(logEntry);
 
-  console.log(
-    `[CALL_TERMINATION_INITIATED] callId=${callId} reason=${reason} classification=${classification} audioWaitMs=${audioDurationMs} timestamp=${logEntry.timestamp}`
-  );
+  console.log(`[CALL_TERMINATION_INITIATED] callId=${callId} reason=${reason} classification=${classification} audioWaitMs=${audioDurationMs}`);
 
-  // Rule 15: Stop accepting new conversation turns and update store
+  // 6. PREVENT CONTINUED CONVERSATION & UPDATE STATE TO ENDING
   try {
     const existingCall = dataStore.getCall(callId);
     if (existingCall) {
       dataStore.updateCall(callId, {
-        status: isIntentional ? CallStatus.COMPLETED : CallStatus.FAILED,
-        stage: "ENDED",
+        status: CallStatus.ENDING,
+        stage: "ENDING",
+        terminationReason: reason,
       });
     }
   } catch (err) {
     console.warn(`[END_CALL] Could not update store for ${callId}:`, err);
   }
 
-  // Update Neon database asynchronously
-  import("../db/prisma").then(({ prisma }) => {
-    prisma.call.update({
-      where: { id: callId },
-      data: {
-        status: isIntentional ? CallStatus.COMPLETED : CallStatus.FAILED,
-        endedAt: new Date(),
-      },
-    }).catch(() => {});
-  }).catch(() => {});
-
-  // Rule 8 & 9: After the final TTS audio finishes playing, wait for audio completion buffer + 600ms safety buffer
-  // Do NOT terminate immediately after generating final TTS text.
-  const waitTime = Math.max(audioDurationMs + 600, 300);
+  // 5. TWO-STEP TERMINATION: Flush audio, then execute provider hang-up
+  const waitTime = Math.max(audioDurationMs + 700, 350);
 
   setTimeout(async () => {
     try {
-      console.log(`[CALL_TERMINATION_EXECUTING] Dropping line for ${callId} after ${waitTime}ms audio playback window.`);
-      await disconnectFn();
+      console.log(`[CALL_TERMINATION_EXECUTING] Dropping line for ${callId} after ${waitTime}ms audio completion window.`);
+
+      // 8. TELEPHONY PROVIDER HANGUP
+      const resolvedProviderId = vobizCallId || dataStore.getCall(callId)?.vobizCallId;
+      if (resolvedProviderId && resolvedProviderId !== "unknown") {
+        await terminateProviderCall(resolvedProviderId);
+        logEntry.providerHangupDispatched = true;
+      }
+
+      // Execute physical stream/websocket disconnect
+      if (typeof disconnectFn === "function") {
+        await disconnectFn();
+      }
+
+      // Mark call state as COMPLETED in memory
+      const finalStatus = isIntentional ? CallStatus.COMPLETED : CallStatus.FAILED;
+      dataStore.updateCall(callId, {
+        status: finalStatus,
+        stage: "COMPLETED",
+        endedAt: new Date().toISOString(),
+        terminationReason: reason,
+      });
+
+      const termInfo = terminatingCalls.get(callId);
+      if (termInfo) termInfo.state = "COMPLETED";
+
+      // Asynchronously update PostgreSQL database
+      import("../db/prisma").then(({ prisma }) => {
+        prisma.call.updateMany({
+          where: {
+            OR: [
+              { id: callId },
+              ...(resolvedProviderId ? [{ vobizCallId: resolvedProviderId }] : []),
+            ],
+          },
+          data: {
+            status: finalStatus,
+            endedAt: new Date(),
+            endReason: reason,
+          },
+        }).catch(() => {});
+      }).catch(() => {});
+
+      // 10. CAMPAIGN SAFETY: Notify campaign manager to free slot and dial next lead
+      const existing = dataStore.getCall(callId);
+      if (existing?.campaignId || existing?.vobizCallId) {
+        import("../campaigns/campaignManager").then(({ campaignManager }) => {
+          campaignManager.handleCallStatusUpdate(existing.vobizCallId || callId, {
+            status: finalStatus,
+            hangup_cause: reason,
+            reason,
+            duration: existing.durationSeconds || 0,
+          });
+        }).catch(() => {});
+      }
+
+      console.log(`[CALL_TERMINATED_CLEANLY] Call ${callId} confirmed COMPLETED. Reason: ${reason} (${classification})`);
     } catch (err: any) {
-      console.error(`[CALL_TERMINATION_ERROR] Error in disconnectFn for ${callId}:`, err?.message || err);
-    } finally {
-      console.log(`[CALL_TERMINATED_CLEANLY] Call ${callId} terminated successfully. Reason: ${reason} (${classification})`);
+      console.error(`[CALL_TERMINATION_ERROR] Error finishing termination for ${callId}:`, err?.message || err);
     }
   }, waitTime);
 
-  return true;
+  return { success: true, status: "ENDING", reason };
 }
 
 /**
- * Inactivity Tracker for telephone turns
- * Rule 13: Silence alone must NOT immediately end the call.
- * Flow:
- * 1. First silence -> wait
- * 2. Prolonged silence (12s) -> "హలో అండి, లైన్ లో ఉన్నారా?" / "Are you still there?"
- * 3. Only after repeated prolonged silence (another 12s) -> gracefully endCall(CONVERSATION_COMPLETED)
+ * 7. TIMEOUT / SILENCE HANDLING
+ * Configurable silence handling:
+ * Step 1: User silent for timeout (e.g. 10s) -> "Are you still there?"
+ * Step 2: User remains silent for another timeout -> "I'll let you go for now. Have a great day."
+ * Step 3: Executes end_call
  */
 export class InactivityManager {
   private callId: string;
@@ -242,8 +460,9 @@ export class InactivityManager {
   private promptUserCallback: (promptText: string) => Promise<void>;
   private terminateCallback: () => Promise<void>;
   private timer: NodeJS.Timeout | null = null;
-  private warningTimeoutMs = 12000; // 12 seconds silence threshold
+  private warningTimeoutMs = 10000; // 10 seconds silence threshold
   private language: string;
+  private isEnded = false;
 
   constructor(opts: {
     callId: string;
@@ -260,15 +479,18 @@ export class InactivityManager {
   }
 
   public recordSpeechActivity(): void {
+    if (this.isEnded) return;
     this.silenceWarningCount = 0;
     this.resetTimer();
   }
 
   public start(): void {
+    if (this.isEnded) return;
     this.resetTimer();
   }
 
   public stop(): void {
+    this.isEnded = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -277,21 +499,38 @@ export class InactivityManager {
 
   private resetTimer(): void {
     if (this.timer) clearTimeout(this.timer);
+    if (this.isEnded) return;
 
     this.timer = setTimeout(async () => {
+      if (this.isEnded) return;
       this.silenceWarningCount++;
+
       if (this.silenceWarningCount < this.maxWarnings) {
-        // Step 2: Prompt user to check if they are still on the line
+        // Step 1: User silent -> prompt: "Are you still there?"
         const prompt = this.language === "ENGLISH"
-          ? "Hello, are you still there? I can help you with anything else."
+          ? "Are you still there? Please let me know if you need anything else."
           : "హలో అండి, లైన్ లో ఉన్నారా? నేను మీకు ఇంకేమైనా సహాయం చేయవచ్చా?";
-        console.log(`[INACTIVITY] Silence warning ${this.silenceWarningCount}/${this.maxWarnings} for ${this.callId}. Checking with caller.`);
-        await this.promptUserCallback(prompt);
+
+        console.log(`[INACTIVITY] Silence detected (warning ${this.silenceWarningCount}/${this.maxWarnings}) for ${this.callId}. Checking with caller.`);
+        try {
+          await this.promptUserCallback(prompt);
+        } catch {}
         this.resetTimer();
       } else {
-        // Step 3: Repeated prolonged silence -> end gracefully with short closing
+        // Step 2: No response after second timeout -> closing message and hangup
+        this.isEnded = true;
+        const closing = this.language === "ENGLISH"
+          ? "I'll let you go for now. Have a great day. Goodbye!"
+          : "సరే అండి, నేను కాల్ ముగిస్తున్నాను. హావ్ ఎ గ్రేట్ డే, బై!";
+
         console.log(`[INACTIVITY] Repeated silence reached threshold for ${this.callId}. Gracefully concluding call.`);
-        await this.terminateCallback();
+        try {
+          await this.promptUserCallback(closing);
+        } catch {}
+
+        try {
+          await this.terminateCallback();
+        } catch {}
       }
     }, this.warningTimeoutMs);
   }

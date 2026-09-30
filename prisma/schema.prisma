@@ -64,6 +64,27 @@ enum CallStatus {
   FAILED
 }
 
+enum CampaignStatus {
+  DRAFT
+  READY
+  RUNNING
+  PAUSED
+  STOPPED
+  COMPLETED
+  FAILED
+}
+
+enum LeadStatus {
+  PENDING
+  QUEUED
+  DIALING
+  CONNECTED
+  COMPLETED
+  FAILED
+  RETRYING
+  SKIPPED
+}
+
 enum MessageRole {
   CALLER
   AI
@@ -89,6 +110,7 @@ model Organization {
   customers       Customer[]
   orders          Order[]
   deployments     AgentDeployment[]
+  campaigns       Campaign[]
 
   @@index([slug])
 }
@@ -176,6 +198,7 @@ model Agent {
   knowledge        AgentKnowledge[]
   calls            Call[]
   deployments      AgentDeployment[]
+  campaigns        Campaign[]
 
   @@index([organizationId])
   @@index([cartesiaAgentId])
@@ -434,4 +457,70 @@ model AgentDeployment {
   @@index([organizationId])
   @@index([agentId])
   @@index([agentId, status])
+}
+
+// ─── Campaign Execution Engine (Persistent State) ──────────────────────────
+
+model Campaign {
+  id                  String         @id @default(cuid())
+  organizationId      String
+  agentId             String
+  name                String
+  description         String?        @db.Text
+  status              CampaignStatus @default(DRAFT)
+  concurrency         Int            @default(2)
+  maxRetries          Int            @default(2)
+  retryDelaySeconds   Int            @default(30)
+  callDelaySeconds    Int            @default(2)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  pausedAt            DateTime?
+  totalContacts       Int            @default(0)
+  completedContacts   Int            @default(0)
+  failedContacts      Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent               Agent          @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  leads               CampaignLead[]
+
+  @@index([organizationId])
+  @@index([agentId])
+  @@index([status])
+  @@index([organizationId, status])
+  @@index([createdAt])
+}
+
+model CampaignLead {
+  id              String     @id @default(cuid())
+  campaignId      String
+  organizationId  String
+  name            String
+  phoneNumber     String     // E.164 formatted (+91XXXXXXXXXX)
+  rawPhoneNumber  String?    // Original input for audit
+  language        String?
+  customData      Json?      // Lead-specific variables e.g. { budget: "₹2Cr", location: "Gachi" }
+  status          LeadStatus @default(PENDING)
+  retriesCount    Int        @default(0)
+  maxRetries      Int        @default(2)
+  callId          String?    // Internal call ID
+  vobizCallId     String?    // Provider call ID (ac_xxx)
+  durationSeconds Int        @default(0)
+  outcome         String?    // "Interested", "Not Interested", "Callback", "No Answer", etc.
+  summary         String?    @db.Text
+  error           String?
+  lastAttemptAt   DateTime?
+  nextRetryAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  campaign        Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, phoneNumber])   // Prevent duplicate contacts within a campaign
+  @@index([campaignId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([campaignId, status])
+  @@index([phoneNumber])
 }

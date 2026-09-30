@@ -133,6 +133,9 @@ export interface CallItem {
   greetingStarted?: boolean;
   greetingCompleted?: boolean;
   audioFramesReceived?: number;
+  campaignId?: string;
+  leadId?: string;
+  workspaceId?: string;
   audioFramesSent?: number;
   bytesReceived?: number;
   bytesSent?: number;
