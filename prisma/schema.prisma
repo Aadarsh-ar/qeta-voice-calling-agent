@@ -39,6 +39,24 @@ enum AgentLanguage {
   ENGLISH
 }
 
+enum CallEventType {
+  CALL_STARTED
+  CALL_CONNECTED
+  STT_PARTIAL
+  STT_FINAL
+  LLM_FIRST_TOKEN
+  LLM_COMPLETE
+  TTS_FIRST_BYTE
+  TTS_COMPLETE
+  TOOL_CALL_START
+  TOOL_CALL_END
+  BARGE_IN
+  CALL_ENDING
+  CALL_ENDED
+  ERROR
+  FALLBACK_TRIGGERED
+}
+
 enum AgentStatus {
   ACTIVE
   INACTIVE
@@ -109,7 +127,7 @@ model Organization {
   pricingRules    ProviderPricing[]
   customers       Customer[]
   orders          Order[]
-  deployments     AgentDeployment[]
+  agentVersions   AgentVersion[]
   campaigns       Campaign[]
 
   @@index([slug])
@@ -174,16 +192,23 @@ model Agent {
   status           AgentStatus   @default(ACTIVE)
   systemPrompt     String        @db.Text
   businessContext  String?       @db.Text
-  cartesiaVoiceId  String?       // Defaults to cloned voice "ff480e6e-3e79-4307-9889-d1d9feb8e20e"
-  cartesiaAgentId  String?       // Cartesia Agent ID (agent_xxx)
-  cartesiaModel    String        @default("sonic-3.6")
+  voiceId          String?       // Cartesia voice UUID for TTS
+  cartesiaVoiceId  String?       // Legacy alias — use voiceId
+  cartesiaAgentId  String?       // Deprecated: Cartesia Agent ID (agent_xxx) — will be removed
+  ttsModel         String        @default("sonic-3.6")
+  cartesiaModel    String        @default("sonic-3.6") // Legacy alias — use ttsModel
   llmModel         String        @default("gemini-2.5-flash")
+  llmProvider      String        @default("groq") // groq, openai, google
   temperature      Float         @default(0.4)
+  sttProvider      String        @default("deepgram") // deepgram, sarvam
+  sttModel         String        @default("nova-3")
   sarvamModel      String        @default("saaras:v3-realtime")
   sarvamLanguage   String        @default("te-IN")
   phoneNumberId    String?       @unique
   businessId       String?
   initialMessage   String?       @db.Text
+  currentVersionNum Int          @default(0) // Auto-incremented on each save
+  // Legacy Cartesia sync fields — deprecated
   cartesiaVersionId String?
   lastSyncedAt     DateTime?
   lastSyncStatus   String?       @default("SYNCED")
@@ -197,7 +222,7 @@ model Agent {
   tools            AgentTool[]
   knowledge        AgentKnowledge[]
   calls            Call[]
-  deployments      AgentDeployment[]
+  versions         AgentVersion[]
   campaigns        Campaign[]
 
   @@index([organizationId])
@@ -278,6 +303,7 @@ model Call {
   id              String             @id @default(cuid())
   organizationId  String
   agentId         String?
+  agentVersionId  String?            // Snapshot: which agent version was active at call start
   vobizCallId     String?            @unique
   streamId        String?
   livekitRoom     String?
@@ -287,6 +313,7 @@ model Call {
   agentNumber     String
   direction       CallDirection      @default(INBOUND)
   status          CallStatus         @default(INITIALIZING)
+  pipelineType    String             @default("livekit") // livekit | cartesia_legacy
   startedAt       DateTime           @default(now())
   endedAt         DateTime?
   durationSeconds Int                @default(0)
@@ -299,13 +326,16 @@ model Call {
 
   organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agent           Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentVersion    AgentVersion?      @relation(fields: [agentVersionId], references: [id], onDelete: SetNull)
   participants    CallParticipant[]
   transcripts     TranscriptMessage[]
   summary         CallSummary?
   usage           Usage?
+  events          CallEvent[]
 
   @@index([organizationId])
   @@index([agentId])
+  @@index([agentVersionId])
   @@index([startedAt])
   @@index([callerNumber])
   @@index([status])
@@ -435,28 +465,80 @@ model Order {
   @@index([createdAt])
 }
 
-model AgentDeployment {
-  id              String        @id @default(cuid())
-  organizationId  String
-  agentId         String
-  versionNumber   Int           @default(1)
-  systemPrompt    String        @db.Text
-  instructions    String?       @db.Text
-  greeting        String?       @db.Text
-  voiceId         String
-  language        AgentLanguage @default(TELUGU_ENGLISH)
-  model           String        @default("llama-3.3-70b-versatile")
-  status          String        @default("LIVE") // DRAFT, LIVE, ARCHIVED
-  configSnapshot  Json?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+// ─── Agent Versioning (Immutable Snapshots) ────────────────────────────────
+// Every agent save creates a new version. Calls pin to the version active at start.
+// Editing an agent never breaks calls in progress.
 
-  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  agent           Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+model AgentVersion {
+  id               String        @id @default(cuid())
+  organizationId   String
+  agentId          String
+  versionNumber    Int           // Auto-incremented per agent
+  name             String
+  description      String?
+  systemPrompt     String        @db.Text
+  instructions     String?       @db.Text
+  initialMessage   String?       @db.Text
+  voiceId          String        // Cartesia TTS voice UUID
+  ttsModel         String        @default("sonic-3.6")
+  llmModel         String        @default("gemini-2.5-flash")
+  llmProvider      String        @default("groq")
+  temperature      Float         @default(0.4)
+  sttProvider      String        @default("deepgram")
+  sttModel         String        @default("nova-3")
+  language         AgentLanguage @default(TELUGU_ENGLISH)
+  businessContext  String?       @db.Text
+  tools            Json?         // Snapshot of tools at this version
+  knowledge        Json?         // Snapshot of knowledge at this version
+  configSnapshot   Json?         // Full config snapshot for audit
+  status           String        @default("LIVE") // LIVE, ARCHIVED
+  createdAt        DateTime      @default(now())
 
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent            Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  calls            Call[]
+
+  @@unique([agentId, versionNumber])
   @@index([organizationId])
   @@index([agentId])
   @@index([agentId, status])
+  @@index([agentId, versionNumber])
+}
+
+// ─── Call Events (Per-Stage Latency & Lifecycle Tracking) ───────────────────
+
+model CallEvent {
+  id            String        @id @default(cuid())
+  callId        String
+  eventType     CallEventType
+  timestampMs   Int           // Relative ms since call start
+  durationMs    Int?          // How long the stage took (e.g. STT processing time)
+  metadata      Json?         // Stage-specific data (e.g. { model: "nova-3", transcript: "..." })
+  error         String?       @db.Text
+  createdAt     DateTime      @default(now())
+
+  call          Call          @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([callId, eventType])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ─── Feature Flags (Per-Tenant Rollout Control) ─────────────────────────────
+
+model FeatureFlag {
+  id              String       @id @default(cuid())
+  organizationId  String       @default("__GLOBAL__") // "__GLOBAL__" = applies to all tenants
+  name            String       // e.g. "use_new_pipeline", "enable_fallbacks"
+  enabled         Boolean      @default(false)
+  metadata        Json?        // Additional config like rollout percentage
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([name])
+  @@index([organizationId])
 }
 
 // ─── Campaign Execution Engine (Persistent State) ──────────────────────────

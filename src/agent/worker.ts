@@ -10,19 +10,12 @@ import { compileAgentVoicePrompt, compileAgentGreeting } from "./prompt.js";
 import { AGENT_TOOLS, executeToolCall } from "../lib/agent/tools.js";
 import { endCall, EndCallReason } from "../lib/telephony/hangupController.js";
 
-// 24/7 Production credential fallbacks — never fail even if env vars are missing
-const FALLBACKS: Record<string, string> = {
-  LIVEKIT_URL: "wss://ai-voice-agent-44qkuva3.livekit.cloud",
-  LIVEKIT_API_KEY: "API6S2vyxFt6xvW",
-  LIVEKIT_API_SECRET: "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG",
-  DEEPGRAM_API_KEY: "5cfc51075cbd0dd63e8cd8b46cc240eed660551d",
-  CARTESIA_API_KEY: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
-  CARTESIA_VOICE_ID: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-  // Groq key split so GitHub push-protection doesn't flag plain-text secrets
-  GROQ_API_KEY: ["g", "s", "k_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join(""),
-};
-for (const [k, v] of Object.entries(FALLBACKS)) {
-  if (!process.env[k]) process.env[k] = v;
+// Validate environment variables loaded via dotenv
+const REQUIRED_VARS = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY", "GROQ_API_KEY"];
+for (const varName of REQUIRED_VARS) {
+  if (!process.env[varName]) {
+    console.warn(`[QETA Worker] Warning: ${varName} is not set in environment.`);
+  }
 }
 
 // Initialize LiveKit logger
@@ -81,6 +74,7 @@ export default defineAgent({
     // 1. Fetch Call Record & Agent Details (Bypassed for demo mode for zero latency)
     let callRecord: any = null;
     let agentData: any = null;
+    let versionSnapshot: any = null;
 
     if (!isDemo) {
       if (callId) {
@@ -99,6 +93,16 @@ export default defineAgent({
           });
           if (callRecord?.agent) {
             agentId = callRecord.agent.id;
+          }
+
+          // If call has a pinned version, load it for immutable config
+          if (callRecord?.agentVersionId) {
+            versionSnapshot = await prisma.agentVersion.findUnique({
+              where: { id: callRecord.agentVersionId },
+            });
+            if (versionSnapshot) {
+              console.log(`[QETA Worker] Call ${callId} pinned to AgentVersion v${versionSnapshot.versionNumber} (${versionSnapshot.id})`);
+            }
           }
         } catch (err) {
           console.warn(`[QETA Worker] Failed to fetch Call record ${callId}:`, err);
@@ -143,14 +147,16 @@ export default defineAgent({
       }
     }
 
-    const agentName = agentData?.name || "Personal Assistant (Sam)";
+    const agentName = versionSnapshot?.name || agentData?.name || "Personal Assistant (Sam)";
     const businessName = agentData?.business?.name || "QETADOTIN Technologies";
-    const language = (agentData?.language as any) || "TELUGU_ENGLISH";
+    const language = (versionSnapshot?.language || agentData?.language || "TELUGU_ENGLISH") as any;
 
-    // Strictly enforce voice id 41508a7d-4839-445f-ba7f-687f620ed0e7 for landing page demo
+    // Strictly enforce voice id for landing page demo or use pinned/agent voice
     const voiceId = isDemo
       ? "41508a7d-4839-445f-ba7f-687f620ed0e7"
-      : (agentData?.cartesiaVoiceId ||
+      : (versionSnapshot?.voiceId ||
+         agentData?.voiceId ||
+         agentData?.cartesiaVoiceId ||
          process.env.CARTESIA_VOICE_ID ||
          "41508a7d-4839-445f-ba7f-687f620ed0e7");
 
@@ -213,10 +219,10 @@ Visitor conversation ముగించాలనుకుంటే:
       : compileAgentVoicePrompt({
           agentName,
           businessName,
-          instructions: agentData?.instructions || agentData?.systemPrompt,
-          businessContext: agentData?.businessContext || agentData?.business?.information,
+          instructions: versionSnapshot?.instructions || versionSnapshot?.systemPrompt || agentData?.instructions || agentData?.systemPrompt,
+          businessContext: versionSnapshot?.businessContext || agentData?.businessContext || agentData?.business?.information,
           language,
-          knowledgeSnippets,
+          knowledgeSnippets: (versionSnapshot?.knowledge as any[])?.map((k: any) => `${k.title}: ${k.content}`) || knowledgeSnippets,
         });
 
     const greeting = isDemo
@@ -224,7 +230,7 @@ Visitor conversation ముగించాలనుకుంటే:
       : compileAgentGreeting({
           agentName,
           businessName,
-          customGreeting: agentData?.initialMessage,
+          customGreeting: versionSnapshot?.initialMessage || agentData?.initialMessage,
           language,
         });
 
@@ -302,6 +308,20 @@ Visitor conversation ముగించాలనుకుంటే:
             startedAt: startTime,
           },
         });
+
+        // Track CALL_CONNECTED in CallEvent
+        await prisma.callEvent.create({
+          data: {
+            callId,
+            eventType: "CALL_CONNECTED",
+            timestampMs: 0,
+            metadata: {
+              room: ctx.room.name,
+              voiceId,
+              agentVersionId: versionSnapshot?.id || null,
+            },
+          },
+        }).catch(() => {});
       } catch (err) {
         console.warn(`[QETA Worker] Failed to set call active for ${callId}:`, err);
       }
@@ -368,6 +388,21 @@ Visitor conversation ముగించాలనుకుంటే:
               durationSeconds: duration,
             },
           });
+
+          // Log CALL_ENDED CallEvent
+          await prisma.callEvent.create({
+            data: {
+              callId,
+              eventType: "CALL_ENDED",
+              timestampMs: duration * 1000,
+              durationMs: duration * 1000,
+              metadata: {
+                turns: transcriptEntries.length,
+                durationSeconds: duration,
+              },
+            },
+          }).catch(() => {});
+
           console.log(`[QETA Call ${callId}] Persisted completed call (duration: ${duration}s)`);
         } catch (err) {
           console.warn(`[QETA Worker] Failed to update completed call ${callId}:`, err);

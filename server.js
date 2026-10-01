@@ -73,31 +73,11 @@ for (const envFile of [".env", ".env.local"]) {
   }
 }
 
-// Ensure 24/7 production fallbacks for all integrations (telephony, LiveKit, STT, LLM)
+// Ensure non-sensitive default fallbacks
 const DEFAULT_ENV_FALLBACKS = {
-  // Vobiz Telephony
-  VOBIZ_AUTH_ID: "MA_1YIFMW7C",
-  VOBIZ_AUTH_TOKEN: "lTaYGZRO9Hpj6XRxvVdiirEcY1yBdiypslLbX5dv9ZQHnjvlqUbf8giYH8hbQvtF",
   VOBIZ_PHONE_NUMBER: "+918071582667",
-  VOBIZ_TRUNK_ID: "f15a55c4-c30f-4d6c-8eb1-e23a6345ec46",
   VOBIZ_SIP_DOMAIN: "f15a55c4.sip.vobiz.ai",
-  VOBIZ_SIP_USERNAME: "qeta_voice_user",
-  VOBIZ_SIP_PASSWORD: "QetaVoice2026!",
-  // Cartesia TTS
-  CARTESIA_API_KEY: "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
-  CARTESIA_AGENT_ID: "agent_vDCfnuFdJokXJDVxgmHeZx",
   CARTESIA_VOICE_ID: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-  // LiveKit Cloud (WebRTC realtime voice)
-  LIVEKIT_URL: "wss://ai-voice-agent-44qkuva3.livekit.cloud",
-  LIVEKIT_API_KEY: "API6S2vyxFt6xvW",
-  LIVEKIT_API_SECRET: "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG",
-  NEXT_PUBLIC_LIVEKIT_URL: "wss://ai-voice-agent-44qkuva3.livekit.cloud",
-  // Deepgram STT
-  DEEPGRAM_API_KEY: "5cfc51075cbd0dd63e8cd8b46cc240eed660551d",
-  // Groq LLM
-  SARVAM_API_KEY: "sk_scyogavs_kh6r7l2swDulfN6ifZYMZRRF",
-  GROQ_API_KEY: ["g", "s", "k", "_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join(""),
-  // Public URLs
   PUBLIC_BASE_URL: "https://voice.qeta.in",
   NEXT_PUBLIC_SERVER_URL: "https://voice.qeta.in",
   VOBIZ_WEBHOOK_URL: "https://voice.qeta.in",

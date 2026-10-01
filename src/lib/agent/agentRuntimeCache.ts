@@ -18,8 +18,9 @@ export interface EssentialAgentRuntimeConfig {
   name: string;
   instructions: string;
   businessName: string;
-  cartesiaAgentId: string;
-  cartesiaVoiceId: string;
+  cartesiaAgentId?: string;
+  cartesiaVoiceId?: string;
+  voiceId?: string;
   language: string;
   enabledTools: Array<{ name: string; description: string }>;
   phoneNumber?: string;

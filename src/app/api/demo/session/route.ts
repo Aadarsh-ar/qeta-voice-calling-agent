@@ -3,17 +3,22 @@ import { AccessToken, RoomServiceClient, AgentDispatchClient } from "livekit-ser
 
 // Verified Production Credentials & Fallbacks
 const DEFAULT_LIVEKIT_URL = "wss://ai-voice-agent-44qkuva3.livekit.cloud";
-const DEFAULT_LIVEKIT_KEY = "API6S2vyxFt6xvW";
-const DEFAULT_LIVEKIT_SECRET = "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG";
 
 // Exact designated landing page live agent & voice ID requested by user
 export const EXACT_LANDING_AGENT_ID = "agent_WzcEn6kkRmPxAfBNHzvpa1";
 export const EXACT_LANDING_VOICE_ID = "41508a7d-4839-445f-ba7f-687f620ed0e7";
 
 export async function POST() {
-  const apiKey = process.env.LIVEKIT_API_KEY || DEFAULT_LIVEKIT_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET || DEFAULT_LIVEKIT_SECRET;
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
   const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL || process.env.LIVEKIT_URL || DEFAULT_LIVEKIT_URL;
+
+  if (!apiKey || !apiSecret) {
+    return NextResponse.json(
+      { success: false, error: "LiveKit credentials are not configured in environment." },
+      { status: 500 }
+    );
+  }
   const agentId = EXACT_LANDING_AGENT_ID;
   const voiceId = EXACT_LANDING_VOICE_ID;
 

@@ -834,7 +834,7 @@ class CampaignManager {
       let callId = `call_camp_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
       let vobizCallId = `vobiz_${Date.now()}`;
       let telephonyStatus = "RINGING";
-      let cartesiaDispatched = false;
+      let isLiveDispatched = false;
 
       try {
         const { dispatchOutboundCall } = await import("@/lib/telephony/outboundDialer");
@@ -851,7 +851,7 @@ class CampaignManager {
         if (dialerResult.callId) callId = dialerResult.callId;
         if (dialerResult.vobizCallId) vobizCallId = dialerResult.vobizCallId;
         telephonyStatus = dialerResult.telephonyStatus;
-        cartesiaDispatched = dialerResult.cartesiaDispatched;
+        isLiveDispatched = dialerResult.livekitDispatched || dialerResult.success;
 
         // If dialer explicitly failed (e.g. invalid voice, missing agent, bad number), fail this contact immediately
         if (!dialerResult.success) {
@@ -866,14 +866,14 @@ class CampaignManager {
       contact.vobizCallId = vobizCallId;
       this.inFlightCalls.set(vobizCallId, { campaignId: campaign.id, contactId: contact.id, startedAt: Date.now() });
 
-      if (telephonyStatus === "FAILED" && !cartesiaDispatched) {
+      if (telephonyStatus === "FAILED" && !isLiveDispatched) {
         // If carrier trunk failed hard with fatal error, mark failure
         this.handleCallFailure(campaign, contact, "Failed to connect to carrier trunk");
         return;
       }
 
-      // Progress call: Polls real Cartesia call status if dispatched, or runs realistic conversational simulation
-      this.monitorOrSimulateCallLifecycle(campaign, contact, cartesiaDispatched, vobizCallId);
+      // Progress call: Polls real call status if dispatched, or runs realistic conversational simulation
+      this.monitorOrSimulateCallLifecycle(campaign, contact, isLiveDispatched, contact.callId);
     } catch (err: any) {
       console.error(`[CAMPAIGN_CALL_ERR] Error dialing ${contact.phoneNumber}:`, err);
       this.handleCallFailure(campaign, contact, err.message || "Dialing error");
@@ -886,12 +886,12 @@ class CampaignManager {
   private async monitorOrSimulateCallLifecycle(
     campaign: Campaign,
     contact: CampaignContact,
-    cartesiaDispatched: boolean = false,
-    cartesiaCallId?: string
+    isLiveDispatched: boolean = false,
+    liveCallId?: string
   ) {
     const startTime = Date.now();
 
-    // 1. Dialing phase: 1.2s fast carrier gateway check (45% latency reduction)
+    // 1. Dialing phase: 1.2s fast carrier gateway check
     await new Promise((r) => setTimeout(r, 1200));
 
     // Check if campaign was stopped while dialing
@@ -901,15 +901,14 @@ class CampaignManager {
       return;
     }
 
-    // If real Cartesia call is active on PSTN, monitor it live
-    if (cartesiaDispatched && cartesiaCallId && cartesiaCallId.startsWith("ac_")) {
+    // If real call is active on PSTN via LiveKit SIP / Vobiz, monitor it live
+    if (isLiveDispatched && liveCallId) {
       try {
-        const { pollCartesiaCallStatus } = await import("@/lib/telephony/outboundDialer");
+        const { pollCallStatus } = await import("@/lib/telephony/outboundDialer");
         let active = true;
         let pollCount = 0;
 
         while (active && pollCount < 90) {
-          // Poll every 1000ms for rapid connection feedback (50% faster detection)
           await new Promise((r) => setTimeout(r, 1000));
           pollCount++;
 
@@ -918,7 +917,7 @@ class CampaignManager {
             break;
           }
 
-          const statusRes = await pollCartesiaCallStatus(cartesiaCallId);
+          const statusRes = await pollCallStatus(liveCallId);
           if (statusRes.status === "in_progress") {
             contact.status = "CONNECTED";
             if (statusRes.durationSeconds > 0) contact.durationSeconds = statusRes.durationSeconds;
@@ -959,9 +958,9 @@ class CampaignManager {
           }
         }
 
-        if (cartesiaDispatched) {
+        if (isLiveDispatched) {
           if (active) {
-            const finalRes = await pollCartesiaCallStatus(cartesiaCallId);
+            const finalRes = await pollCallStatus(liveCallId);
             if (finalRes.status === "completed" || contact.status === "CONNECTED") {
               contact.status = "COMPLETED";
               contact.durationSeconds = Math.max(15, finalRes.durationSeconds || Math.round((Date.now() - startTime) / 1000));
@@ -978,7 +977,7 @@ class CampaignManager {
               return;
             }
           }
-          this.markContactFlightEnd(campaign.id, contact.id, cartesiaCallId);
+          this.markContactFlightEnd(campaign.id, contact.id, liveCallId);
           this.recomputeMetrics(campaign);
           return;
         }

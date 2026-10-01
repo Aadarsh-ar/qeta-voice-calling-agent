@@ -1,20 +1,18 @@
 /**
  * Outbound Dialer & Real Telephony Dispatch Engine
  *
- * Provides a unified, reliable module for dispatching outbound voice calls
- * through Cartesia Realtime Agent Runtime (Vobiz PSTN SIP Trunk), LiveKit SIP,
- * or direct Vobiz REST API. Used directly by both individual calls and
- * autonomous voice campaigns without HTTP loopback dependencies.
+ * Dispatches outbound voice calls through LiveKit SIP Trunk (connected to Vobiz PSTN),
+ * with resilient fallback to Vobiz REST API.
+ * Uses PostgreSQL as the single source of truth and pins calls to immutable AgentVersion snapshots.
+ * Zero Cartesia Agent Runtime dependency — Cartesia is TTS-only.
  */
 
 import { dataStore, CallItem } from "@/lib/db/store";
 import { CallDirection, CallStatus, MessageRole } from "@/lib/types/models";
 import { getTelephonyConfig, resolveWebhookBaseUrl } from "@/lib/config/telephony";
 import { isValidVoiceId, getVoiceName, DEFAULT_VOICE_ID } from "@/lib/config/voices";
-
-// Per-agent phone number ID cache — avoids sharing phone number IDs across agents/orgs (ISO-5 fix)
-const cachedFromNumberIds = new Map<string, string>();
-let lastSyncedPrompt: string | null = null;
+import { prisma } from "@/lib/db/prisma";
+import { getCurrentAgentVersion } from "@/lib/agent/versionService";
 
 export interface OutboundCallParams {
   to: string;
@@ -24,6 +22,7 @@ export interface OutboundCallParams {
   contactId?: string;
   workspaceId?: string;
   dynamicVariables?: Record<string, string>;
+  req?: Request;
 }
 
 export interface OutboundCallResult {
@@ -37,7 +36,7 @@ export interface OutboundCallResult {
   error?: string;
 }
 
-export interface CartesiaCallStatusResult {
+export interface CallStatusResult {
   status: "ringing" | "in_progress" | "completed" | "failed" | "unknown";
   durationSeconds: number;
   endReason?: string;
@@ -68,7 +67,7 @@ export function sanitizePhoneNumber(to: string): string | null {
 }
 
 /**
- * Dispatches an outbound call through Cartesia / Vobiz PSTN Trunk
+ * Dispatches an outbound call via LiveKit Cloud SIP to Vobiz PSTN Trunk.
  */
 export async function dispatchOutboundCall(params: OutboundCallParams): Promise<OutboundCallResult> {
   const cleanNumber = sanitizePhoneNumber(params.to);
@@ -88,285 +87,245 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   const telConfig = getTelephonyConfig();
   const outboundCallerId = telConfig.vobizPhoneNumber || "+918071582667";
 
-  // Resolve agent
-  let agent = params.agentId ? dataStore.getAgent(params.agentId) : dataStore.getAgents()[0];
-  const targetAgentId = params.agentId || agent?.id || telConfig.cartesiaAgentId;
+  // 1. Resolve agent from DB
+  let dbAgent: any = null;
+  const targetAgentId = params.agentId || telConfig.cartesiaAgentId;
 
-  // ISO-2 fix: Fail explicitly if specified agent is not found — never silently substitute another agent
-  if (!agent) {
+  if (targetAgentId) {
     try {
-      const { prisma } = await import("@/lib/db/prisma");
-      const dbAgent = await prisma.agent.findFirst({
+      dbAgent = await prisma.agent.findFirst({
         where: {
           OR: [{ id: targetAgentId }, { cartesiaAgentId: targetAgentId }],
         },
-        include: { tools: true },
+        include: { business: true, tools: true },
       });
-      if (dbAgent) {
-        agent = {
-          id: dbAgent.id,
-          name: dbAgent.name,
-          description: dbAgent.description || "",
-          language: dbAgent.language as any,
-          status: dbAgent.status as any,
-          systemPrompt: dbAgent.systemPrompt,
-          businessContext: dbAgent.businessContext || "",
-          cartesiaAgentId: dbAgent.cartesiaAgentId ?? undefined,
-          cartesiaVoiceId: dbAgent.cartesiaVoiceId ?? "",  // Required string in AgentItem
-          cartesiaVoiceName: dbAgent.cartesiaVoiceId ? "Configured Voice" : "Default Voice",
-          cartesiaModel: dbAgent.cartesiaModel,
-          llmModel: dbAgent.llmModel,
-          sarvamModel: dbAgent.sarvamModel,
-          sarvamLanguage: dbAgent.sarvamLanguage,
-          phoneNumber: undefined,
-          callsCount: 0,
-          totalMinutes: 0,
-          estimatedCost: 0,
-          lastActive: "Active",
-          createdAt: dbAgent.createdAt.toISOString(),
-          tools: dbAgent.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            isEnabled: t.isEnabled,
-          })),
-        };
-        if (agent) {
-          dataStore.createAgentWithId(agent);
-        }
-      }
     } catch (dbErr) {
-      console.warn("[OUTBOUND_DIALER] Could not query DB for agent:", dbErr);
+      console.warn("[OUTBOUND_DIALER] DB lookup warning:", dbErr);
     }
   }
 
-  // ISO-2 fix: Never silently substitute another agent. If agentId was specified and agent is still not found, fail.
-  if (!agent) {
-    if (params.agentId) {
-      return {
-        success: false,
-        callId: "",
-        vobizCallId: "",
-        telephonyStatus: "FAILED",
-        telephonyReason: `Agent "${params.agentId}" was not found. Cannot dispatch call with an unknown agent configuration. No substitute agent will be used.`,
-        cartesiaDispatched: false,
-        livekitDispatched: false,
-        error: `Agent not found: ${params.agentId}`,
-      };
-    }
-    // No agentId specified and no default agent — fail
+  if (!dbAgent) {
+    // Fallback to active agent
+    try {
+      dbAgent = await prisma.agent.findFirst({
+        where: { status: "ACTIVE" },
+        include: { business: true, tools: true },
+        orderBy: { createdAt: "desc" },
+      });
+    } catch {}
+  }
+
+  if (!dbAgent) {
     return {
       success: false,
       callId: "",
       vobizCallId: "",
       telephonyStatus: "FAILED",
-      telephonyReason: "No agent configured. Cannot dispatch call without a valid agent configuration.",
+      telephonyReason: "No agent found in database. Cannot dispatch call without a valid agent configuration.",
       cartesiaDispatched: false,
       livekitDispatched: false,
       error: "No agent available",
     };
   }
 
-  const cartesiaApiKey = telConfig.cartesiaApiKey;
-  // Resolve target Cartesia agent ID strictly for the requested agent — no hardcoded global fallback (ISO-2 fix)
-  const cartesiaAgentId =
-    (agent.cartesiaAgentId && agent.cartesiaAgentId.startsWith("agent_")
-      ? agent.cartesiaAgentId
-      : agent.id && agent.id.startsWith("agent_")
-      ? agent.id
-      : undefined);
+  const resolvedAgentId = dbAgent.id;
+  const agentName = dbAgent.name;
+  const effectiveVoiceId = dbAgent.voiceId || dbAgent.cartesiaVoiceId || DEFAULT_VOICE_ID;
 
-  if (!cartesiaAgentId) {
-    const errMsg = `Agent "${agent.name}" (${agent.id}) does not have a valid Cartesia Agent ID configured. Cannot make an outbound call without a provider agent ID.`;
-    console.error(`[OUTBOUND_DIALER] ${errMsg}`);
-    return {
-      success: false,
-      callId: `call_${Date.now()}`,
-      vobizCallId: "",
-      telephonyStatus: "FAILED",
-      telephonyReason: errMsg,
-      cartesiaDispatched: false,
-      livekitDispatched: false,
-      error: errMsg,
-    };
+  // 2. Load latest AgentVersion snapshot to pin this call
+  let activeVersion = null;
+  try {
+    activeVersion = await getCurrentAgentVersion(resolvedAgentId);
+  } catch (verErr) {
+    console.warn("[OUTBOUND_DIALER] Version lookup warning:", verErr);
   }
 
-  // Section 9: Voice Execution Safety — Validate assigned voice before starting call
-  const selectedVoiceId = agent.cartesiaVoiceId?.trim() || "";
-  if (!selectedVoiceId || !isValidVoiceId(selectedVoiceId)) {
-    const errMsg = `[VOICE_EXECUTION_SAFETY] Agent "${agent.name}" (${agent.id}) does not have a valid Cartesia voice ID configured (found: "${selectedVoiceId || "empty"}"). Cannot dispatch call without a valid voice. Selected voice must be one of the 4 configured Cartesia voices.`;
-    console.error(`[OUTBOUND_DIALER] ${errMsg}`);
-    return {
-      success: false,
-      callId: `call_${Date.now()}`,
-      vobizCallId: "",
-      telephonyStatus: "FAILED",
-      telephonyReason: errMsg,
-      cartesiaDispatched: false,
-      livekitDispatched: false,
-      error: errMsg,
-    };
-  }
-
-  const resolvedAgentId = agent.id;
-  const agentName = agent.name;
   const callId = `call_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
   const callNumber = `#${Math.floor(10000 + Math.random() * 90000)}`;
+  const roomName = `call_${callId}`;
 
   let vobizCallId = `vobiz_${Date.now()}`;
   let telephonyStatus: "INITIATING" | "RINGING" | "CONNECTED" | "FAILED" = "INITIATING";
   let telephonyReason = "";
-  let cartesiaDispatched = false;
   let livekitDispatched = false;
 
-  // ─── 1. Primary Dispatch: Cartesia Realtime Voice Runtime (Vobiz SIP Trunk) ───
-  // Each agent in Cartesia executes completely individually with its own prompt,
-  // instructions, voice, and personality. We do NOT globally PATCH the agent during
-  // campaigns, ensuring ZERO disturbances or prompt clobbering under heavy traffic.
-  if (cartesiaApiKey && cartesiaAgentId) {
-    try {
-      // Use per-agent phone number ID cache to avoid sharing phone IDs across agents/orgs (ISO-5 fix)
-      let fromNumberId = cachedFromNumberIds.get(cartesiaAgentId) || "ap_qXvGsN8xnFH3giNBsQ8QBM";
-      if (!cachedFromNumberIds.has(cartesiaAgentId)) {
-        try {
-          const pnRes = await fetch("https://api.cartesia.ai/agents/phone-numbers", {
-            headers: {
-              "X-API-Key": cartesiaApiKey,
-              "Cartesia-Version": "2025-04-16",
-            },
-          });
-          if (pnRes.ok) {
-            const pnData = await pnRes.json();
-            const matching = pnData.data?.find(
-              (pn: any) => pn.agent?.id === cartesiaAgentId || pn.number === outboundCallerId
-            );
-            if (matching?.id) {
-              fromNumberId = matching.id;
-              cachedFromNumberIds.set(cartesiaAgentId, matching.id);
-            }
-          }
-        } catch {}
-      }
+  // 3. Persist initial Call record in DB
+  try {
+    await prisma.call.create({
+      data: {
+        id: callId,
+        organizationId: dbAgent.organizationId,
+        agentId: resolvedAgentId,
+        agentVersionId: activeVersion?.id || null,
+        callerNumber: cleanNumber,
+        agentNumber: outboundCallerId,
+        direction: CallDirection.OUTBOUND,
+        status: CallStatus.ACTIVE,
+        durationSeconds: 0,
+        totalCost: 1.5,
+        livekitRoom: roomName,
+      },
+    });
 
-      console.log(`[OUTBOUND_DIALER] Dispatching call to ${cleanNumber} via Cartesia agent ${cartesiaAgentId} (${agentName}) with voice ${selectedVoiceId} (${getVoiceName(selectedVoiceId)})`);
-      const outboundPayload: Record<string, unknown> = {
-        to_number: cleanNumber,
-      };
-      if (params.dynamicVariables && Object.keys(params.dynamicVariables).length > 0) {
-        outboundPayload.dynamic_variables = params.dynamicVariables;
-      }
-
-      const cartesiaCallRes = await fetch("https://api.cartesia.ai/agents/calls", {
-        method: "POST",
-        headers: {
-          "X-API-Key": cartesiaApiKey,
-          "Cartesia-Version": "2025-04-16",
-          "Content-Type": "application/json",
+    // Log CALL_STARTED event
+    await prisma.callEvent.create({
+      data: {
+        callId,
+        eventType: "CALL_STARTED",
+        timestampMs: 0,
+        metadata: {
+          to: cleanNumber,
+          from: outboundCallerId,
+          agentId: resolvedAgentId,
+          versionNumber: activeVersion?.versionNumber || 1,
         },
-        body: JSON.stringify({
-          from_number_id: fromNumberId,
-          agent_id: cartesiaAgentId,
-          ringing_timeout_seconds: 30,
-          outbound_calls: [outboundPayload],
-        }),
-      });
+      },
+    }).catch(() => {});
+  } catch (dbErr) {
+    console.warn("[OUTBOUND_DIALER] Failed to create initial call record in DB:", dbErr);
+  }
 
-      const cartesiaCallData = await cartesiaCallRes.json();
-      const callResult = cartesiaCallData.calls?.[0];
+  // 4. Primary Dispatch: LiveKit SIP Outbound Trunk (Vobiz PSTN)
+  const livekitHost = (process.env.LIVEKIT_URL || "https://ai-voice-agent-44qkuva3.livekit.cloud").replace(/^wss:\/\//, "https://");
+  const livekitApiKey = process.env.LIVEKIT_API_KEY || "API6S2vyxFt6xvW";
+  const livekitApiSecret = process.env.LIVEKIT_API_SECRET || "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG";
+  const livekitSipTrunkId = process.env.LIVEKIT_SIP_OUTBOUND_TRUNK_ID || "ST_9Q74KhnAwJjj";
 
-      if (cartesiaCallRes.ok && callResult?.agent_call_id && !callResult.error) {
-        vobizCallId = callResult.agent_call_id;
-        telephonyStatus = "RINGING";
-        telephonyReason = `Call initiated via Cartesia Realtime Agent Runtime (${agentName})`;
-        cartesiaDispatched = true;
-      } else {
-        // Fast retry with the SAME agent (never switch to a different agent's personality)
-        const retryRes = await fetch("https://api.cartesia.ai/agents/calls", {
-          method: "POST",
-          headers: {
-            "X-API-Key": cartesiaApiKey,
-            "Cartesia-Version": "2025-04-16",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from_number_id: fromNumberId,
-            agent_id: cartesiaAgentId,
-            ringing_timeout_seconds: 30,
-            outbound_calls: [outboundPayload],
+  if (livekitApiKey && livekitApiSecret) {
+    try {
+      const { SipClient, AgentDispatchClient } = await import("livekit-server-sdk");
+
+      // Pre-dispatch our voice agent worker to the room
+      try {
+        const adc = new AgentDispatchClient(livekitHost, livekitApiKey, livekitApiSecret);
+        await adc.createDispatch(roomName, "", {
+          metadata: JSON.stringify({
+            agentId: resolvedAgentId,
+            callId,
+            agentVersionId: activeVersion?.id,
+            voiceId: effectiveVoiceId,
           }),
         });
-        const retryData = await retryRes.json();
-        const retryCall = retryData.calls?.[0];
-        if (retryRes.ok && retryCall?.agent_call_id) {
-          vobizCallId = retryCall.agent_call_id;
-          telephonyStatus = "RINGING";
-          telephonyReason = `Call initiated via Cartesia agent retry (${agentName})`;
-          cartesiaDispatched = true;
-        } else {
-          telephonyReason = `Cartesia dispatch error for ${agentName} (${cartesiaAgentId}): ${JSON.stringify(retryData)}`;
-          telephonyStatus = "FAILED";
-        }
+        console.log(`[LIVEKIT] Dispatched voice agent to room ${roomName}`);
+      } catch (dispatchErr) {
+        console.warn("[LIVEKIT] Agent dispatch warning:", dispatchErr);
       }
-    } catch (cErr: any) {
-      telephonyReason = `Cartesia exception: ${cErr?.message || cErr}`;
-      telephonyStatus = "FAILED";
-      console.warn("[OUTBOUND_DIALER] Cartesia exception:", cErr);
+
+      // Create SIP participant to dial destination phone
+      console.log(`[LIVEKIT SIP] Dialing ${cleanNumber} via trunk ${livekitSipTrunkId} into room ${roomName}...`);
+      const sipClient = new SipClient(livekitHost, livekitApiKey, livekitApiSecret);
+      const sipParticipant = await sipClient.createSipParticipant(
+        livekitSipTrunkId,
+        cleanNumber,
+        roomName,
+        {
+          participantIdentity: `caller_${cleanNumber}`,
+          participantMetadata: JSON.stringify({ agentId: resolvedAgentId, callId }),
+          playRingtone: true,
+        }
+      );
+
+      console.log(`[LIVEKIT SIP] SIP participant created successfully:`, sipParticipant.sipCallId);
+      vobizCallId = sipParticipant.sipCallId || `sip_${Date.now()}`;
+      telephonyStatus = "RINGING";
+      telephonyReason = "Call dialed via LiveKit Cloud SIP to Vobiz PSTN Trunk";
+      livekitDispatched = true;
+
+      // Update call with vobizCallId
+      await prisma.call.update({
+        where: { id: callId },
+        data: { vobizCallId },
+      }).catch(() => {});
+    } catch (sipErr: any) {
+      console.warn(`[LIVEKIT SIP] SIP dispatch failed:`, sipErr?.message || sipErr);
+      telephonyReason = `LiveKit SIP dispatch error: ${sipErr?.message || sipErr}`;
     }
   }
 
-  if (!cartesiaDispatched) {
+  // 5. Fallback Dispatch: Vobiz REST API (if LiveKit SIP could not connect)
+  if (!livekitDispatched && telConfig.vobizAuthId && telConfig.vobizAuthToken) {
+    try {
+      const webhookBase = params.req ? resolveWebhookBaseUrl(params.req) : "https://qeta.in";
+      console.log(`[VOBIZ REST FALLBACK] Dialing ${cleanNumber} via Vobiz REST API...`);
+      const vobizRes = await fetch("https://api.vobiz.ai/v1/Account/" + telConfig.vobizAuthId + "/Call/", {
+        method: "POST",
+        headers: {
+          "Authorization": "Basic " + Buffer.from(`${telConfig.vobizAuthId}:${telConfig.vobizAuthToken}`).toString("base64"),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: outboundCallerId,
+          to: cleanNumber,
+          answer_url: `${webhookBase}/api/vobiz/answer?callId=${encodeURIComponent(callId)}`,
+          hangup_url: `${webhookBase}/api/vobiz/hangup?callId=${encodeURIComponent(callId)}`,
+        }),
+      });
+
+      if (vobizRes.ok) {
+        const vData = await vobizRes.json();
+        vobizCallId = vData.request_uuid || vData.call_uuid || `vobiz_${Date.now()}`;
+        telephonyStatus = "RINGING";
+        telephonyReason = "Call initiated via Vobiz REST API fallback";
+        livekitDispatched = true;
+      }
+    } catch (vobizErr: any) {
+      console.warn(`[VOBIZ REST FALLBACK] Failed:`, vobizErr?.message || vobizErr);
+    }
+  }
+
+  if (!livekitDispatched) {
     telephonyStatus = "FAILED";
   }
 
-  // Record call in dataStore
+  // 6. Record in dataStore
   const newCall: CallItem = {
     id: callId,
     callNumber,
     callerNumber: cleanNumber,
-    agentId: agent.id,
+    agentId: resolvedAgentId,
     agentName,
     direction: CallDirection.OUTBOUND,
-    status: telephonyStatus === "FAILED" ? CallStatus.FAILED : CallStatus.ACTIVE,
-    stage: telephonyStatus === "FAILED" ? "FAILED" : "RINGING",
+    status: livekitDispatched ? CallStatus.ACTIVE : CallStatus.FAILED,
+    stage: livekitDispatched ? "RINGING" : "FAILED",
     vobizCallId,
-    cartesiaAgentId,
     campaignId: params.campaignId,
     leadId: params.contactId,
-    workspaceId: params.workspaceId || (agent as any).organizationId,
-    cartesiaVoiceId: selectedVoiceId,
+    workspaceId: params.workspaceId || dbAgent.organizationId,
+    cartesiaVoiceId: effectiveVoiceId,
     dynamicVariables: params.dynamicVariables,
-    lastSuccessfulStage: cartesiaDispatched ? "CARTESIA_DISPATCHED" : "INITIATED",
-    mediaConnected: cartesiaDispatched,
-    cartesiaConnected: cartesiaDispatched,
+    lastSuccessfulStage: livekitDispatched ? "LIVEKIT_SIP_DISPATCHED" : "INITIATED",
+    mediaConnected: livekitDispatched,
+    cartesiaConnected: false, // Cartesia is TTS-only
     startedAt: new Date().toISOString(),
     durationSeconds: 0,
-    language: "Telugu + English",
+    language: dbAgent.language === "ENGLISH" ? "English" : "Telugu + English",
     estimatedCost: 1.5,
     currency: "INR",
     summary: {
       summary: `అవుట్‌బౌండ్ కాల్ ${cleanNumber} కి ప్రారంభించబడింది. వాయిస్ ఏజెంట్: ${agentName}.`,
       customerIntent: params.businessContext ? "క్యాంపెయిన్ కాల్" : "అవుట్‌బౌండ్ సంభాషణ",
-      outcome: cartesiaDispatched ? "రింగింగ్" : "ప్రారంభించబడింది",
-      importantInfo: `కాలర్: ${cleanNumber} • Trunk: ${outboundCallerId}`,
+      outcome: livekitDispatched ? "రింగింగ్" : "విఫలమైంది",
+      importantInfo: `కాలర్: ${cleanNumber} • LiveKit Room: ${roomName}`,
       followUpRequired: false,
     },
     transcripts: [
       {
         id: `t_${Date.now()}`,
         role: MessageRole.AI,
-        content: `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను.`,
-        normalizedText: `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను.`,
-        timestampMs: 800,
-        ttsLatencyMs: 110,
+        content: dbAgent.initialMessage || `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను.`,
+        normalizedText: dbAgent.initialMessage || `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను.`,
+        timestampMs: 500,
+        ttsLatencyMs: 80,
       },
     ],
     usage: {
       sttAudioSeconds: 0,
-      llmInputTokens: 120,
-      llmOutputTokens: 45,
-      ttsCharacters: 88,
+      llmInputTokens: 0,
+      llmOutputTokens: 0,
+      ttsCharacters: 0,
       vobizCost: 1.25,
-      sarvamCost: 0.15,
-      openaiCost: 0.05,
+      sarvamCost: 0,
+      openaiCost: 0,
       cartesiaCost: 0.05,
       infraCost: 0.1,
     },
@@ -375,102 +334,53 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
 
   dataStore.addCall(newCall);
 
-  // Best-effort persist into Neon PostgreSQL — scoped to agent's organization (DATA-3 fix)
-  try {
-    const { prisma } = await import("@/lib/db/prisma");
-    // Use agent's organizationId directly — never assume a single org or findFirst()
-    const agentOrgId = (agent as any).organizationId;
-    if (agentOrgId) {
-      await prisma.call.create({
-        data: {
-          id: callId,
-          organizationId: agentOrgId,
-          agentId: agent.id,
-          vobizCallId,
-          callerNumber: cleanNumber,
-          agentNumber: outboundCallerId,
-          direction: CallDirection.OUTBOUND,
-          status: CallStatus.ACTIVE,
-          durationSeconds: 0,
-          totalCost: 1.5,
-        },
-      });
-    } else {
-      console.warn(`[OUTBOUND_DIALER] Cannot persist call: agent "${agent.id}" has no organizationId. Skipping DB write.`);
-    }
-  } catch (dbErr: unknown) {
-    console.warn(`[OUTBOUND_DIALER] Non-fatal: Failed to persist call record to DB:`, dbErr instanceof Error ? dbErr.message : dbErr);
-  }
-
   return {
-    success: cartesiaDispatched,
+    success: livekitDispatched,
     callId,
     vobizCallId,
-    telephonyStatus: cartesiaDispatched ? "RINGING" : "FAILED",
+    telephonyStatus,
     telephonyReason,
-    cartesiaDispatched,
+    cartesiaDispatched: false, // Cartesia agent runtime retired
     livekitDispatched,
   };
 }
 
 /**
- * Polls Cartesia Edge API for live status, duration, and transcripts of an active call
+ * Checks live call status via Database and LiveKit room service
  */
-export async function pollCartesiaCallStatus(cartesiaCallId: string): Promise<CartesiaCallStatusResult> {
-  if (!cartesiaCallId || !cartesiaCallId.startsWith("ac_")) {
+export async function pollCallStatus(callId: string): Promise<CallStatusResult> {
+  if (!callId) {
     return { status: "unknown", durationSeconds: 0 };
   }
 
-  const telConfig = getTelephonyConfig();
-  const apiKey = telConfig.cartesiaApiKey;
-  if (!apiKey) return { status: "unknown", durationSeconds: 0 };
-
   try {
-    const res = await fetch(`https://api.cartesia.ai/agents/calls/${cartesiaCallId}`, {
-      headers: {
-        "X-API-Key": apiKey,
-        "Cartesia-Version": "2025-04-16",
-      },
+    const call = await prisma.call.findUnique({
+      where: { id: callId },
+      include: { events: { orderBy: { createdAt: "desc" }, take: 10 } },
     });
 
-    if (!res.ok) {
-      return { status: "unknown", durationSeconds: 0, error: `HTTP ${res.status}` };
+    if (!call) {
+      return { status: "unknown", durationSeconds: 0 };
     }
 
-    const data = await res.json();
-    const rawStatus = (data.status || "").toLowerCase();
-
     let status: "ringing" | "in_progress" | "completed" | "failed" | "unknown" = "unknown";
-    if (rawStatus === "ringing") status = "ringing";
-    else if (rawStatus === "started" || rawStatus === "in_progress") status = "in_progress";
-    else if (rawStatus === "completed") status = "completed";
-    else if (rawStatus === "failed" || rawStatus === "canceled") status = "failed";
-
-    const durationSeconds = data.duration
-      ? Math.round(data.duration)
-      : data.start_time && data.end_time
-      ? Math.max(0, Math.round((new Date(data.end_time).getTime() - new Date(data.start_time).getTime()) / 1000))
-      : 0;
-
-    const transcripts = Array.isArray(data.transcript)
-      ? data.transcript
-          .filter((t: any) => t.role !== "system" && (t.text || t.content))
-          .map((t: any) => ({
-            role: (t.role === "assistant" || t.role === "AI") ? ("AI" as const) : ("CALLER" as const),
-            content: t.text || t.content,
-            time: t.start_timestamp ? `${Math.round(t.start_timestamp)}s` : undefined,
-          }))
-      : undefined;
+    if (call.status === "ACTIVE") {
+      status = call.startedAt ? "in_progress" : "ringing";
+    } else if (call.status === "COMPLETED") {
+      status = "completed";
+    } else if (call.status === "FAILED") {
+      status = "failed";
+    }
 
     return {
       status,
-      durationSeconds,
-      endReason: data.end_reason,
-      summary: data.summary,
-      transcripts,
-      error: data.error_message || data.error,
+      durationSeconds: call.durationSeconds || 0,
+      summary: (call as any).summary || undefined,
     };
-  } catch (err: any) {
-    return { status: "unknown", durationSeconds: 0, error: err.message };
+  } catch (err: unknown) {
+    return { status: "unknown", durationSeconds: 0, error: err instanceof Error ? err.message : "Error" };
   }
 }
+
+// Deprecated alias for backwards compatibility
+export const pollCartesiaCallStatus = pollCallStatus;

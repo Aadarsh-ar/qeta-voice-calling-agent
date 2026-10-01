@@ -1,12 +1,8 @@
 /**
- * Cartesia Official Agent Synchronization Service
- *
- * Implements Section 3 & Section 15:
- * 1. Validate configuration.
- * 2. Synchronize supported configuration with Cartesia Agent API.
- * 3. Verify synchronization via GET /v1/agents/{id}.
- * 4. Store and return verified Cartesia Agent ID.
- * 5. Strict multi-tenant safety: never uses default, hardcoded, or random agents.
+ * @deprecated RETIRED IN PHASE 3.
+ * Cartesia is now used ONLY for TTS (voice_id -> speech).
+ * Agent configuration is stored strictly in PostgreSQL Neon DB as the single source of truth.
+ * Do NOT use this file for new agent CRUD or call runtime.
  */
 
 import { compileAgentInstructions, compileAgentGreeting } from "../agent/promptCompiler";

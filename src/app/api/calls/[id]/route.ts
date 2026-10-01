@@ -15,36 +15,52 @@ export async function GET(
         where: {
           OR: [{ id }, { vobizCallId: id }],
         },
+        include: {
+          agent: true,
+          agentVersion: true,
+          summary: true,
+          transcripts: { orderBy: { timestampMs: "asc" } },
+        },
       });
       if (dbCall) {
+        const agentName = dbCall.agentVersion?.name || dbCall.agent?.name || "Voice Agent";
+        const dbTranscripts = dbCall.transcripts.map((t) => ({
+          id: t.id,
+          role: t.role as any,
+          content: t.content,
+          normalizedText: t.normalizedText || t.content,
+          timestampMs: t.timestampMs,
+          ttsLatencyMs: t.ttsLatencyMs || undefined,
+        }));
+
         call = {
           id: dbCall.id,
           callNumber: `#${dbCall.id.slice(-5)}`,
           callerNumber: dbCall.callerNumber,
           agentId: dbCall.agentId || "default",
-          agentName: "Harika (Telugu Faculty Voice)",
+          agentName,
           direction: dbCall.direction as any,
           status: dbCall.status as any,
           stage: dbCall.status === "ACTIVE" ? "MEDIA_CONNECTED" : "ENDED",
           vobizCallId: dbCall.vobizCallId || "",
           startedAt: dbCall.createdAt.toISOString(),
           durationSeconds: dbCall.durationSeconds || 0,
-          language: "Telugu + English",
+          language: dbCall.agent?.language === "ENGLISH" ? "English" : "Telugu + English",
           estimatedCost: dbCall.totalCost ? Number(dbCall.totalCost) : 1.5,
-          currency: "INR",
+          currency: dbCall.currency || "INR",
           summary: {
-            summary: "వాయిస్ కాల్ సంభాషణ వివరాలు.",
-            customerIntent: "సంభాషణ",
-            outcome: "పూర్తయింది",
-            importantInfo: `కాలర్: ${dbCall.callerNumber}`,
-            followUpRequired: false,
+            summary: dbCall.summary?.summary || "వాయిస్ కాల్ సంభాషణ వివరాలు.",
+            customerIntent: dbCall.summary?.customerIntent || "సంభాషణ",
+            outcome: dbCall.summary?.outcome || (dbCall.status === "COMPLETED" ? "పూర్తయింది" : "కనెక్ట్ చేయబడింది"),
+            importantInfo: dbCall.summary?.importantInfo || `కాలర్: ${dbCall.callerNumber}`,
+            followUpRequired: dbCall.summary?.followUpRequired || false,
           },
-          transcripts: [
+          transcripts: dbTranscripts.length > 0 ? dbTranscripts : [
             {
               id: `t_${Date.now()}`,
               role: MessageRole.AI,
-              content: "నమస్కారం అండి! నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీకు ఏ విధంగా సహాయపడగలను?",
-              normalizedText: "నమస్కారం అండి! నేను హారిక మేడమ్ మాట్లాడుతున్నాను. మీకు ఏ విధంగా సహాయపడగలను?",
+              content: dbCall.agent?.initialMessage || `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను. మీకు ఏ విధంగా సహాయపడగలను?`,
+              normalizedText: dbCall.agent?.initialMessage || `నమస్కారం అండి! నేను ${agentName} మాట్లాడుతున్నాను. మీకు ఏ విధంగా సహాయపడగలను?`,
               timestampMs: 800,
             },
           ],

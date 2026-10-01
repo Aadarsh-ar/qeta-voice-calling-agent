@@ -27,7 +27,7 @@ export class CartesiaClient {
     if (cleanEnvKey && cleanEnvKey.startsWith("sk_car_")) {
       return cleanEnvKey;
     }
-    return this.apiKey || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    return this.apiKey || "";
   }
 
   isConfigured(): boolean {
@@ -101,7 +101,6 @@ export class CartesiaClient {
       throw new Error("Cartesia API key is not configured.");
     }
 
-    const MASTER_KEY = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
     const primaryKey = this.getApiKey();
 
     const payload = {
@@ -131,26 +130,8 @@ export class CartesiaClient {
         body: JSON.stringify(payload),
       });
     } catch (netErr: any) {
-      console.warn("[CARTESIA] Primary key network error:", netErr.message);
+      console.warn("[CARTESIA] Synthesis network error:", netErr.message);
       res = new Response(netErr.message || "Network Error", { status: 599 });
-    }
-
-    // Auto-retry with master key if environment key or primary key failed for ANY reason (status != 200)
-    if (!res.ok && primaryKey !== MASTER_KEY) {
-      console.warn(`[CARTESIA] Primary key synthesis failed (HTTP ${res.status}). Retrying with master fallback key...`);
-      try {
-        res = await fetch(`${this.baseUrl}/tts/bytes`, {
-          method: "POST",
-          headers: {
-            "X-API-Key": MASTER_KEY,
-            "Cartesia-Version": this.version,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch (retryErr: any) {
-        console.warn("[CARTESIA] Master key fallback network error:", retryErr.message);
-      }
     }
 
     const latencyMs = Date.now() - t0;

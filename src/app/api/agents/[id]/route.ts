@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 import { dataStore, AgentItem } from "@/lib/db/store";
 import { prisma } from "@/lib/db/prisma";
-import { syncAgentWithCartesia, getCartesiaAgentDetails } from "@/lib/cartesia/sync";
 import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 import { isValidVoiceId, DEFAULT_VOICE_ID, AVAILABLE_VOICES, getVoiceName } from "@/lib/config/voices";
+import { compileAgentInstructions, compileAgentGreeting } from "@/lib/agent/promptCompiler";
+import { createAgentVersion } from "@/lib/agent/versionService";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const url = new URL(req.url);
-  const skipCartesia = url.searchParams.get("skipCartesia") === "true";
 
   let dbAgent: any = null;
   try {
@@ -30,17 +29,17 @@ export async function GET(
         instructions: true,
         systemPrompt: true,
         businessContext: true,
+        voiceId: true,
         cartesiaVoiceId: true,
         cartesiaAgentId: true,
         cartesiaModel: true,
+        ttsModel: true,
         llmModel: true,
+        llmProvider: true,
         language: true,
         status: true,
         initialMessage: true,
-        cartesiaVersionId: true,
-        lastSyncedAt: true,
-        lastSyncStatus: true,
-        lastSyncError: true,
+        currentVersionNum: true,
         createdAt: true,
         updatedAt: true,
         phoneNumber: { select: { e164Number: true } },
@@ -58,6 +57,9 @@ export async function GET(
         tools: {
           select: { name: true, description: true, isEnabled: true, enabled: true },
         },
+        knowledge: {
+          select: { title: true, content: true },
+        },
       },
     });
   } catch (err) {
@@ -73,49 +75,6 @@ export async function GET(
   if (!dbAgent && !existingStoreAgent) {
     return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
   }
-
-  const targetCartesiaAgentId =
-    dbAgent?.cartesiaAgentId ||
-    (id.startsWith("agent_") ? id : undefined) ||
-    existingStoreAgent?.cartesiaAgentId;
-
-  // Always attempt to fetch live ground truth from Cartesia if agent is linked
-  let liveCartesiaData: any = null;
-  if (!skipCartesia && targetCartesiaAgentId && process.env.CARTESIA_API_KEY) {
-    try {
-      liveCartesiaData = await getCartesiaAgentDetails(targetCartesiaAgentId);
-    } catch (cartesiaErr) {
-      console.warn(`[CARTESIA_GET_WARN] Could not fetch live Cartesia agent ${targetCartesiaAgentId}:`, cartesiaErr);
-    }
-  }
-
-  // Determine authoritative fields: Site Database is ALWAYS the single source of truth!
-  // The user sets instructions on our site, and our site controls Cartesia, never the reverse.
-  const liveInstructions =
-    dbAgent?.instructions ||
-    dbAgent?.systemPrompt ||
-    existingStoreAgent?.instructions ||
-    existingStoreAgent?.systemPrompt ||
-    liveCartesiaData?.llm_system_prompt ||
-    "";
-
-  const liveGreeting =
-    dbAgent?.initialMessage ||
-    existingStoreAgent?.initialMessage ||
-    (liveCartesiaData?.llm_introduce !== undefined && liveCartesiaData.llm_introduce !== null
-      ? liveCartesiaData.llm_introduce
-      : "");
-
-  const liveVoiceId =
-    liveCartesiaData?.tts_voice ||
-    dbAgent?.cartesiaVoiceId ||
-    existingStoreAgent?.cartesiaVoiceId ||
-    DEFAULT_VOICE_ID;
-
-  const liveLanguage =
-    liveCartesiaData?.tts_language === "en"
-      ? "ENGLISH"
-      : (dbAgent?.language || existingStoreAgent?.language || "TELUGU_ENGLISH");
 
   let parsedBizProfile: any = undefined;
   if (dbAgent?.businessContext && dbAgent.businessContext.trim().startsWith("{")) {
@@ -133,27 +92,29 @@ export async function GET(
       location: dbAgent.business.address || "",
       contactInfo: dbAgent.business.contactInformation || "",
       website: dbAgent.business.website || "",
+      faqs: (dbAgent.knowledge || []).map((k: any) => ({ question: k.title, answer: k.content })),
     };
   }
 
   const agentIdResolved = dbAgent?.id || id;
+  const effectiveVoiceId = dbAgent?.voiceId || dbAgent?.cartesiaVoiceId || existingStoreAgent?.cartesiaVoiceId || DEFAULT_VOICE_ID;
+  const liveInstructions = dbAgent?.instructions || dbAgent?.systemPrompt || existingStoreAgent?.instructions || existingStoreAgent?.systemPrompt || "";
+  const liveGreeting = dbAgent?.initialMessage || existingStoreAgent?.initialMessage || "";
+
   const agentItem: AgentItem = {
     id: agentIdResolved,
-    name: dbAgent?.name || existingStoreAgent?.name || "AD2 — Aadarsh",
+    name: dbAgent?.name || existingStoreAgent?.name || "Agent",
     description: dbAgent?.description || existingStoreAgent?.description || "",
-    language: liveLanguage as any,
+    language: (dbAgent?.language || existingStoreAgent?.language || "TELUGU_ENGLISH") as any,
     status: (dbAgent?.status || existingStoreAgent?.status || "ACTIVE") as any,
     systemPrompt: liveInstructions,
     instructions: liveInstructions,
     initialMessage: liveGreeting,
-    cartesiaVersionId: liveCartesiaData?.pinned_version || liveCartesiaData?.version?.id || dbAgent?.cartesiaVersionId || "active",
-    lastSyncedAt: liveCartesiaData?.updated_at || dbAgent?.lastSyncedAt?.toISOString() || new Date().toISOString(),
-    lastSyncStatus: liveCartesiaData ? "SYNCED" : (dbAgent?.lastSyncStatus as any || "SYNCED"),
     businessContext: dbAgent?.businessContext || existingStoreAgent?.businessContext || "",
     businessProfile: parsedBizProfile || existingStoreAgent?.businessProfile,
-    cartesiaVoiceId: liveVoiceId,
-    cartesiaVoiceName: getVoiceName(liveVoiceId),
-    cartesiaModel: dbAgent?.cartesiaModel || "sonic-3.6",
+    cartesiaVoiceId: effectiveVoiceId,
+    cartesiaVoiceName: getVoiceName(effectiveVoiceId),
+    cartesiaModel: dbAgent?.ttsModel || dbAgent?.cartesiaModel || "sonic-3.6",
     llmModel: dbAgent?.llmModel || "gemini-2.5-flash",
     sarvamModel: "saaras:v3-realtime",
     sarvamLanguage: "te-IN",
@@ -161,33 +122,21 @@ export async function GET(
     callsCount: existingStoreAgent?.callsCount || 0,
     totalMinutes: existingStoreAgent?.totalMinutes || 0,
     estimatedCost: existingStoreAgent?.estimatedCost || 0,
-    lastActive: "Active & Synchronized",
+    lastActive: "Active (DB Authoritative)",
     createdAt: dbAgent?.createdAt?.toISOString() || existingStoreAgent?.createdAt || new Date().toISOString(),
     tools: dbAgent?.tools
       ? dbAgent.tools.map((t: any) => ({ name: t.name, description: t.description, isEnabled: t.enabled && t.isEnabled }))
       : existingStoreAgent?.tools || [],
-    cartesiaAgentId: targetCartesiaAgentId,
+    cartesiaAgentId: dbAgent?.cartesiaAgentId || existingStoreAgent?.cartesiaAgentId || undefined,
   };
 
   dataStore.createAgentWithId(agentItem);
 
-  // If live data from Cartesia was fetched, keep PostgreSQL in sync
-  if (liveCartesiaData && dbAgent?.id) {
-    prisma.agent.update({
-      where: { id: dbAgent.id },
-      data: {
-        instructions: liveInstructions,
-        systemPrompt: liveInstructions,
-        initialMessage: liveGreeting,
-        cartesiaVoiceId: liveVoiceId,
-        lastSyncedAt: new Date(),
-        lastSyncStatus: "SYNCED",
-        lastSyncError: null,
-      },
-    }).catch((uErr) => console.warn("Background DB sync warning:", uErr));
-  }
-
-  return NextResponse.json({ success: true, agent: agentItem });
+  return NextResponse.json({
+    success: true,
+    agent: agentItem,
+    version: dbAgent?.currentVersionNum || 1,
+  });
 }
 
 export async function PUT(
@@ -200,232 +149,184 @@ export async function PUT(
 
     const currentAgent = dataStore.getAgent(id);
 
-    // Exact Cartesia Agent ID resolution — no random or fake fallbacks
-    let cartesiaAgentId =
-      body.cartesiaAgentId && body.cartesiaAgentId.trim().startsWith("agent_")
-        ? body.cartesiaAgentId.trim()
-        : currentAgent?.cartesiaAgentId && currentAgent.cartesiaAgentId.startsWith("agent_")
-        ? currentAgent.cartesiaAgentId
-        : id.startsWith("agent_")
-        ? id
-        : undefined;
-
-    if (!cartesiaAgentId) {
-      try {
-        const dbCheck = await prisma.agent.findUnique({
-          where: { id },
-          select: { cartesiaAgentId: true },
-        });
-        if (dbCheck?.cartesiaAgentId && dbCheck.cartesiaAgentId.startsWith("agent_")) {
-          cartesiaAgentId = dbCheck.cartesiaAgentId;
-        }
-      } catch {}
-    }
-
-    const bizProfile = body.businessProfile || currentAgent?.businessProfile || {};
-    const agentName = body.name || currentAgent?.name || "AD2 — Aadarsh";
-    const agentInstructions = (body.instructions || body.systemPrompt || currentAgent?.instructions || currentAgent?.systemPrompt || "").trim();
-    const initialMessage = body.initialMessage !== undefined ? body.initialMessage : currentAgent?.initialMessage;
-    let voiceId = (body.cartesiaVoiceId || currentAgent?.cartesiaVoiceId || DEFAULT_VOICE_ID).trim();
-    if (!isValidVoiceId(voiceId)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Invalid cartesiaVoiceId "${voiceId}". Must be one of the 4 configured Cartesia voices: ${AVAILABLE_VOICES.map((v) => `${v.name} (${v.id})`).join(", ")}`,
-        },
-        { status: 400 }
-      );
-    }
-    const language = body.language || currentAgent?.language || "TELUGU_ENGLISH";
-    const tools = body.tools || currentAgent?.tools || [];
-
-    // ── STEP 1: Synchronize with Cartesia Official Agent API ──────────────────
-    let syncResult;
-    try {
-      syncResult = await syncAgentWithCartesia({
-        cartesiaAgentId,
-        agentName,
-        instructions: agentInstructions,
-        initialMessage,
-        businessName: bizProfile.businessName,
-        businessDescription: bizProfile.description,
-        businessInformation: bizProfile.productsServices,
-        operatingHours: bizProfile.workingHours,
-        address: bizProfile.location,
-        contactInformation: bizProfile.contactInfo,
-        website: bizProfile.website,
-        faqs: bizProfile.faqs,
-        policies: bizProfile.policies,
-        tools,
-        cartesiaVoiceId: voiceId,
-        language,
-      });
-    } catch (cartesiaErr: unknown) {
-      console.error("[CARTESIA_SYNC_ERROR] Update rejected by Cartesia:", cartesiaErr);
-      // STRICT REQUIREMENT: Do NOT save or show success if Cartesia synchronization failed
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Cartesia synchronization failed: ${cartesiaErr instanceof Error ? cartesiaErr.message : "Unknown error"}`,
-        },
-        { status: 502 }
-      );
-    }
-
-    const verifiedCartesiaAgentId = syncResult.cartesiaAgentId;
-
-    // ── STEP 2: Persist to PostgreSQL Neon DB (Multi-Tenant Org Scoped) ───────
-    try {
-      const org = await prisma.organization.findFirst();
-      if (org) {
-        // Upsert Business specifically for this agent (never mutate other agents' businesses)
-        let businessRecord = null;
-        if (bizProfile.businessName) {
-          const currentDbAgent = await prisma.agent.findUnique({
-            where: { id },
-            select: { businessId: true },
-          });
-
-          if (currentDbAgent?.businessId) {
-            businessRecord = await prisma.business.update({
-              where: { id: currentDbAgent.businessId },
-              data: {
-                name: bizProfile.businessName,
-                description: bizProfile.description || "",
-                information: bizProfile.productsServices || "",
-                operatingHours: bizProfile.workingHours || "",
-                address: bizProfile.location || "",
-                contactInformation: bizProfile.contactInfo || "",
-                website: bizProfile.website || "",
-              },
-            });
-          } else {
-            businessRecord = await prisma.business.create({
-              data: {
-                organizationId: org.id,
-                name: bizProfile.businessName,
-                description: bizProfile.description || "",
-                information: bizProfile.productsServices || "",
-                operatingHours: bizProfile.workingHours || "",
-                address: bizProfile.location || "",
-                contactInformation: bizProfile.contactInfo || "",
-                website: bizProfile.website || "",
-              },
-            });
-          }
-        }
-
-        // Update Agent record with verified Cartesia sync metadata
-        await prisma.agent.upsert({
-          where: { id },
-          create: {
-            id,
-            organizationId: org.id,
-            name: agentName,
-            description: body.description || currentAgent?.description || "",
-            instructions: agentInstructions,
-            systemPrompt: syncResult.instructions,
-            initialMessage: syncResult.initialMessage,
-            cartesiaAgentId: verifiedCartesiaAgentId,
-            cartesiaVoiceId: voiceId,
-            language: language as any,
-            status: body.status || currentAgent?.status || "ACTIVE",
-            businessId: businessRecord?.id,
-            businessContext: JSON.stringify(bizProfile),
-            cartesiaVersionId: syncResult.cartesiaVersionId,
-            lastSyncedAt: new Date(),
-            lastSyncStatus: "SYNCED",
-            lastSyncError: null,
-          },
-          update: {
-            name: agentName,
-            description: body.description !== undefined ? body.description : undefined,
-            instructions: agentInstructions,
-            systemPrompt: syncResult.instructions,
-            initialMessage: syncResult.initialMessage,
-            cartesiaAgentId: verifiedCartesiaAgentId,
-            cartesiaVoiceId: voiceId,
-            language: language as any,
-            status: body.status !== undefined ? body.status : undefined,
-            businessId: businessRecord?.id,
-            businessContext: JSON.stringify(bizProfile),
-            cartesiaVersionId: syncResult.cartesiaVersionId,
-            lastSyncedAt: new Date(),
-            lastSyncStatus: "SYNCED",
-            lastSyncError: null,
-          },
-        });
-
-        // Update Tools
-        if (body.tools && Array.isArray(body.tools)) {
-          await prisma.agentTool.deleteMany({ where: { agentId: id } });
-          await prisma.agentTool.createMany({
-            data: body.tools.map((t: { name: string; description: string; isEnabled?: boolean; enabled?: boolean }) => ({
-              agentId: id,
-              name: t.name,
-              description: t.description,
-              enabled: t.isEnabled !== false && t.enabled !== false,
-              isEnabled: t.isEnabled !== false && t.enabled !== false,
-            })),
-            skipDuplicates: true,
-          });
-        }
-
-        // Update Knowledge chunks (FAQs)
-        if (bizProfile.faqs && Array.isArray(bizProfile.faqs)) {
-          await prisma.agentKnowledge.deleteMany({ where: { agentId: id } });
-          const knowledgeRows = bizProfile.faqs
-            .filter((f: { question: string; answer: string }) => f.question && f.answer)
-            .map((f: { question: string; answer: string }) => ({
-              agentId: id,
-              title: f.question,
-              content: f.answer,
-              metadata: { type: "faq" },
-            }));
-
-          if (knowledgeRows.length > 0) {
-            await prisma.agentKnowledge.createMany({ data: knowledgeRows });
-          }
-        }
-      }
-    } catch (dbErr) {
-      console.warn("[DB_WARNING] PostgreSQL persistence warning:", dbErr);
-    }
-
-    // ── STEP 3: Update local memory store & warm runtime cache ─────────────────
-    const updated = dataStore.updateAgent(id, {
-      ...body,
-      name: agentName,
-      instructions: syncResult.instructions,
-      systemPrompt: syncResult.instructions,
-      initialMessage: syncResult.initialMessage,
-      cartesiaAgentId: verifiedCartesiaAgentId,
-      cartesiaVoiceId: voiceId,
-      cartesiaVersionId: syncResult.cartesiaVersionId,
-      lastSyncedAt: new Date().toISOString(),
-      lastSyncStatus: "SYNCED",
-      businessProfile: bizProfile,
-      lastActive: "Active & Synchronized",
+    // Look up in DB
+    const dbAgent = await prisma.agent.findFirst({
+      where: {
+        OR: [{ id }, { cartesiaAgentId: id }],
+      },
+      include: {
+        business: true,
+        tools: true,
+        knowledge: true,
+      },
     });
 
-    agentRuntimeCache.invalidate(id, {
-      id,
-      organizationId: (currentAgent as any)?.organizationId || "org_default",
+    if (!dbAgent && !currentAgent) {
+      return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
+    }
+
+    const resolvedId = dbAgent?.id || id;
+    const agentName = body.name || dbAgent?.name || currentAgent?.name || "Agent";
+    const agentInstructions = (body.instructions || body.systemPrompt || dbAgent?.instructions || dbAgent?.systemPrompt || "").trim();
+
+    if (!agentName) {
+      return NextResponse.json({ success: false, error: "Agent name cannot be empty." }, { status: 400 });
+    }
+
+    let voiceId = (body.cartesiaVoiceId || dbAgent?.voiceId || dbAgent?.cartesiaVoiceId || currentAgent?.cartesiaVoiceId || DEFAULT_VOICE_ID).trim();
+    if (!isValidVoiceId(voiceId)) {
+      voiceId = DEFAULT_VOICE_ID;
+    }
+
+    const language = body.language || dbAgent?.language || currentAgent?.language || "TELUGU_ENGLISH";
+    const bizProfile = body.businessProfile || (dbAgent?.businessContext && dbAgent.businessContext.trim().startsWith("{") ? JSON.parse(dbAgent.businessContext) : {});
+
+    // Compile dynamic instructions and greeting locally
+    const compiledInstructions = compileAgentInstructions({
+      agentName,
+      instructions: agentInstructions,
+      businessName: bizProfile.businessName,
+      businessDescription: bizProfile.description,
+      businessInformation: bizProfile.productsServices,
+      operatingHours: bizProfile.workingHours,
+      address: bizProfile.location,
+      contactInformation: bizProfile.contactInfo,
+      website: bizProfile.website,
+      faqs: bizProfile.faqs,
+      policies: bizProfile.policies,
+      tools: body.tools || dbAgent?.tools || [],
+      language,
+    });
+
+    const compiledGreeting = compileAgentGreeting({
+      agentName,
+      businessName: bizProfile.businessName,
+      customGreeting: body.customGreeting || body.initialMessage,
+      language,
+    });
+
+    // ── Update PostgreSQL (Single source of truth) ───────────────────────────
+    let businessRecord = null;
+    if (bizProfile.businessName && dbAgent?.organizationId) {
+      if (dbAgent.businessId) {
+        businessRecord = await prisma.business.update({
+          where: { id: dbAgent.businessId },
+          data: {
+            name: bizProfile.businessName,
+            description: bizProfile.description || "",
+            information: bizProfile.productsServices || "",
+            operatingHours: bizProfile.workingHours || "",
+            address: bizProfile.location || "",
+            contactInformation: bizProfile.contactInfo || "",
+            website: bizProfile.website || "",
+          },
+        }).catch(() => null);
+      } else {
+        businessRecord = await prisma.business.create({
+          data: {
+            organizationId: dbAgent.organizationId,
+            name: bizProfile.businessName,
+            description: bizProfile.description || "",
+            information: bizProfile.productsServices || "",
+            operatingHours: bizProfile.workingHours || "",
+            address: bizProfile.location || "",
+            contactInformation: bizProfile.contactInfo || "",
+            website: bizProfile.website || "",
+          },
+        }).catch(() => null);
+      }
+    }
+
+    // Update the Agent record
+    const updatedDbAgent = await prisma.agent.update({
+      where: { id: resolvedId },
+      data: {
+        name: agentName,
+        description: body.description !== undefined ? body.description : undefined,
+        instructions: agentInstructions,
+        systemPrompt: compiledInstructions,
+        initialMessage: compiledGreeting,
+        voiceId,
+        cartesiaVoiceId: voiceId,
+        language: language as any,
+        status: body.status !== undefined ? body.status : undefined,
+        businessId: businessRecord?.id || undefined,
+        businessContext: JSON.stringify(bizProfile),
+        updatedAt: new Date(),
+      },
+    });
+
+    // Update Tools if provided
+    if (body.tools && Array.isArray(body.tools)) {
+      await prisma.agentTool.deleteMany({ where: { agentId: resolvedId } });
+      await prisma.agentTool.createMany({
+        data: body.tools.map((t: { name: string; description: string; isEnabled?: boolean; enabled?: boolean }) => ({
+          agentId: resolvedId,
+          name: t.name,
+          description: t.description,
+          enabled: t.isEnabled !== false && t.enabled !== false,
+          isEnabled: t.isEnabled !== false && t.enabled !== false,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    // Update Knowledge items (FAQs) if provided
+    if (bizProfile.faqs && Array.isArray(bizProfile.faqs)) {
+      await prisma.agentKnowledge.deleteMany({ where: { agentId: resolvedId } });
+      const knowledgeRows = bizProfile.faqs
+        .filter((f: { question: string; answer: string }) => f.question && f.answer)
+        .map((f: { question: string; answer: string }) => ({
+          agentId: resolvedId,
+          title: f.question,
+          content: f.answer,
+          metadata: { type: "faq" },
+        }));
+
+      if (knowledgeRows.length > 0) {
+        await prisma.agentKnowledge.createMany({ data: knowledgeRows });
+      }
+    }
+
+    // Create an immutable version snapshot of the new config!
+    let versionSnapshot = null;
+    try {
+      versionSnapshot = await createAgentVersion(resolvedId);
+    } catch (verErr) {
+      console.warn("[AGENT_VERSION] Warning creating version snapshot:", verErr);
+    }
+
+    // Update in-memory dataStore & warm runtime cache
+    const updated = dataStore.updateAgent(resolvedId, {
+      ...body,
       name: agentName,
-      instructions: syncResult.instructions,
+      instructions: agentInstructions,
+      systemPrompt: compiledInstructions,
+      initialMessage: compiledGreeting,
+      cartesiaVoiceId: voiceId,
+      cartesiaVoiceName: getVoiceName(voiceId),
+      businessProfile: bizProfile,
+      lastActive: "Active (DB Authoritative)",
+    });
+
+    agentRuntimeCache.invalidate(resolvedId, {
+      id: resolvedId,
+      organizationId: updatedDbAgent.organizationId,
+      name: agentName,
+      instructions: compiledInstructions,
       businessName: bizProfile.businessName || "QETADOTIN",
-      cartesiaAgentId: verifiedCartesiaAgentId,
+      cartesiaAgentId: updatedDbAgent.cartesiaAgentId || undefined,
       cartesiaVoiceId: voiceId,
       language,
-      enabledTools: (tools || []).filter((t: any) => t.isEnabled !== false && t.enabled !== false),
+      enabledTools: (body.tools || []).filter((t: any) => t.isEnabled !== false && t.enabled !== false),
       phoneNumber: body.phoneNumber || currentAgent?.phoneNumber,
       updatedAt: new Date().toISOString(),
     });
 
-    // Invalidate server.js in-memory greeting and agent metadata cache
+    // Invalidate server.js cache
     try {
       const port = process.env.PORT || "3000";
-      await fetch(`http://127.0.0.1:${port}/api/agent/cache-invalidate?agentId=${encodeURIComponent(id)}`, {
+      await fetch(`http://127.0.0.1:${port}/api/agent/cache-invalidate?agentId=${encodeURIComponent(resolvedId)}`, {
         method: "POST",
       }).catch(() => {});
     } catch {}
@@ -433,14 +334,14 @@ export async function PUT(
     return NextResponse.json({
       success: true,
       agent: updated,
-      synced: true,
-      cartesiaAgentId: verifiedCartesiaAgentId,
-      cartesiaVersionId: syncResult.cartesiaVersionId,
-      updatedAt: syncResult.updatedAt,
-      instructions: syncResult.instructions,
-      initialMessage: syncResult.initialMessage,
+      version: versionSnapshot?.versionNumber || updatedDbAgent.currentVersionNum,
+      updatedAt: updatedDbAgent.updatedAt.toISOString(),
+      instructions: agentInstructions,
+      systemPrompt: compiledInstructions,
+      initialMessage: compiledGreeting,
     });
   } catch (err: unknown) {
+    console.error("[AGENTS_PUT_ERROR]", err);
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "Error updating agent" },
       { status: 500 }
@@ -458,8 +359,6 @@ export async function DELETE(
     const { id } = await params;
     const cleanId = id.trim();
 
-    // 1. Resolve agent IDs (both DB cuid and Cartesia agent_xxx)
-    let cartesiaAgentId: string | undefined = cleanId.startsWith("agent_") ? cleanId : undefined;
     let resolvedDbId: string = cleanId;
 
     try {
@@ -471,48 +370,30 @@ export async function DELETE(
       });
       if (dbAgent) {
         resolvedDbId = dbAgent.id;
-        if (dbAgent.cartesiaAgentId) {
-          cartesiaAgentId = dbAgent.cartesiaAgentId;
-        }
       }
     } catch (lookupErr) {
       console.warn("[AGENT_DELETE] DB lookup warning:", lookupErr);
     }
 
-    // 2. Delete from Cartesia API so agent never resurrects from Cartesia sync
-    if (cartesiaAgentId) {
-      const { deleteCartesiaAgent } = await import("@/lib/cartesia/sync");
-      await deleteCartesiaAgent(cartesiaAgentId);
-    }
-
-    // 3. Mark deleted in DataStore and invalidate runtime cache
+    // Mark deleted in DataStore and runtime cache
     dataStore.deleteAgent(resolvedDbId);
     dataStore.markAgentDeleted(resolvedDbId);
     agentRuntimeCache.invalidate(resolvedDbId);
 
-    if (cartesiaAgentId) {
-      dataStore.deleteAgent(cartesiaAgentId);
-      dataStore.markAgentDeleted(cartesiaAgentId);
-      agentRuntimeCache.invalidate(cartesiaAgentId);
-    }
-
-    // 4. Clean up all database references and delete from PostgreSQL
+    // Clean up all DB records
     try {
-      // Disconnect phone numbers and business from agent
       await prisma.agent.updateMany({
-        where: { OR: [{ id: resolvedDbId }, ...(cartesiaAgentId ? [{ cartesiaAgentId }] : [])] },
+        where: { id: resolvedDbId },
         data: { phoneNumberId: null, businessId: null },
       });
 
-      // Detach calls
       await prisma.call.updateMany({
-        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+        where: { agentId: resolvedDbId },
         data: { agentId: null },
       });
 
-      // Delete associated campaigns & leads
       const campaigns = await prisma.campaign.findMany({
-        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
+        where: { agentId: resolvedDbId },
         select: { id: true },
       });
       for (const camp of campaigns) {
@@ -520,30 +401,16 @@ export async function DELETE(
         await prisma.campaign.delete({ where: { id: camp.id } }).catch(() => {});
       }
 
-      // Delete agent knowledge, tools, and deployments
-      await prisma.agentDeployment.deleteMany({
-        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
-      }).catch(() => {});
-      await prisma.agentKnowledge.deleteMany({
-        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
-      }).catch(() => {});
-      await prisma.agentTool.deleteMany({
-        where: { OR: [{ agentId: resolvedDbId }, ...(cartesiaAgentId ? [{ agentId: cartesiaAgentId }] : [])] },
-      }).catch(() => {});
+      await prisma.agentVersion.deleteMany({ where: { agentId: resolvedDbId } }).catch(() => {});
+      await prisma.agentKnowledge.deleteMany({ where: { agentId: resolvedDbId } }).catch(() => {});
+      await prisma.agentTool.deleteMany({ where: { agentId: resolvedDbId } }).catch(() => {});
 
-      // Permanently delete agent row(s)
-      const deleteResult = await prisma.agent.deleteMany({
-        where: {
-          OR: [{ id: resolvedDbId }, ...(cartesiaAgentId ? [{ cartesiaAgentId }] : [])],
-        },
-      });
-      console.log(`[AGENT_DELETED_PERMANENTLY] Agent "${cleanId}" rows deleted from DB: ${deleteResult.count}`);
+      await prisma.agent.delete({ where: { id: resolvedDbId } });
     } catch (dbErr) {
-      console.error("[AGENT_DELETE_DB_ERROR] Failed during DB deletion:", dbErr);
+      console.error("[AGENT_DELETE_DB_ERROR]", dbErr);
       throw dbErr;
     }
 
-    console.log(`[AGENT_DELETED_PERMANENTLY] Agent "${cleanId}" successfully deleted across DB, Cartesia, and DataStore.`);
     return NextResponse.json({ success: true, deleted: true, id: cleanId });
   } catch (err: unknown) {
     return NextResponse.json(
