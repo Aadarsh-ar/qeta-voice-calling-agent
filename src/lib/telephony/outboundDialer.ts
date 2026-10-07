@@ -87,20 +87,32 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   const telConfig = getTelephonyConfig();
   const outboundCallerId = telConfig.vobizPhoneNumber || "+918071582667";
 
-  // 1. Resolve agent from DB
+  // 1. Resolve agent from dataStore or DB
   let dbAgent: any = null;
   const targetAgentId = params.agentId || telConfig.cartesiaAgentId;
 
   if (targetAgentId) {
-    try {
-      dbAgent = await prisma.agent.findFirst({
-        where: {
-          OR: [{ id: targetAgentId }, { cartesiaAgentId: targetAgentId }],
-        },
-        include: { business: true, tools: true },
-      });
-    } catch (dbErr) {
-      console.warn("[OUTBOUND_DIALER] DB lookup warning:", dbErr);
+    const memAgent = dataStore.getAgent(targetAgentId);
+    if (memAgent) {
+      dbAgent = {
+        id: memAgent.id,
+        name: memAgent.name,
+        organizationId: "org_default",
+        voiceId: memAgent.cartesiaVoiceId,
+        cartesiaVoiceId: memAgent.cartesiaVoiceId,
+        cartesiaAgentId: memAgent.cartesiaAgentId,
+      };
+    } else {
+      try {
+        dbAgent = await prisma.agent.findFirst({
+          where: {
+            OR: [{ id: targetAgentId }, { cartesiaAgentId: targetAgentId }],
+          },
+          include: { business: true, tools: true },
+        });
+      } catch (dbErr) {
+        console.warn("[OUTBOUND_DIALER] DB lookup warning:", dbErr);
+      }
     }
   }
 
@@ -130,7 +142,21 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
 
   const resolvedAgentId = dbAgent.id;
   const agentName = dbAgent.name;
-  const effectiveVoiceId = dbAgent.voiceId || dbAgent.cartesiaVoiceId || DEFAULT_VOICE_ID;
+  const effectiveVoiceId = dbAgent.voiceId || dbAgent.cartesiaVoiceId;
+
+  // Voice execution safety check: require valid voice
+  if (!effectiveVoiceId || !isValidVoiceId(effectiveVoiceId)) {
+    return {
+      success: false,
+      callId: "",
+      vobizCallId: "",
+      telephonyStatus: "FAILED",
+      telephonyReason: `VOICE_EXECUTION_SAFETY: Agent "${agentName}" has missing or invalid voice ID "${effectiveVoiceId || "none"}". Cannot dispatch call without a verified Cartesia voice.`,
+      cartesiaDispatched: false,
+      livekitDispatched: false,
+      error: "VOICE_EXECUTION_SAFETY: Invalid or missing voice ID",
+    };
+  }
 
   // 2. Load latest AgentVersion snapshot to pin this call
   let activeVersion = null;
@@ -151,22 +177,42 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
 
   // 3. Persist initial Call record in DB
   try {
-    await prisma.call.create({
-      data: {
-        id: callId,
-        organizationId: dbAgent.organizationId,
-        agentId: resolvedAgentId,
-        agentVersionId: activeVersion?.id || null,
-        callerNumber: cleanNumber,
-        agentNumber: outboundCallerId,
-        direction: CallDirection.OUTBOUND,
-        status: CallStatus.ACTIVE,
-        durationSeconds: 0,
-        totalCost: 1.5,
-        livekitRoom: roomName,
-      },
-    });
+    let orgId = dbAgent.organizationId;
+    if (!orgId || orgId === "org_default") {
+      const firstOrg = await prisma.organization.findFirst();
+      if (firstOrg) orgId = firstOrg.id;
+    }
 
+    let validAgentIdForDb: string | null = null;
+    const existingDbAgent = await prisma.agent.findUnique({ where: { id: resolvedAgentId } });
+    if (existingDbAgent) {
+      validAgentIdForDb = resolvedAgentId;
+      if (!orgId) orgId = existingDbAgent.organizationId;
+    } else {
+      const fallbackDbAgent = await prisma.agent.findFirst();
+      if (fallbackDbAgent) {
+        validAgentIdForDb = fallbackDbAgent.id;
+        if (!orgId) orgId = fallbackDbAgent.organizationId;
+      }
+    }
+
+    if (orgId) {
+      await prisma.call.create({
+        data: {
+          id: callId,
+          organizationId: orgId,
+          agentId: validAgentIdForDb,
+          agentVersionId: activeVersion?.id || null,
+          callerNumber: cleanNumber,
+          agentNumber: outboundCallerId,
+          direction: CallDirection.OUTBOUND,
+          status: CallStatus.ACTIVE,
+          durationSeconds: 0,
+          totalCost: 1.5,
+          livekitRoom: roomName,
+        },
+      });
+    }
     // Log CALL_STARTED event
     await prisma.callEvent.create({
       data: {
@@ -247,7 +293,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     try {
       const webhookBase = params.req ? resolveWebhookBaseUrl(params.req) : "https://qeta.in";
       console.log(`[VOBIZ REST FALLBACK] Dialing ${cleanNumber} via Vobiz REST API...`);
-      const vobizRes = await fetch("https://api.vobiz.ai/v1/Account/" + telConfig.vobizAuthId + "/Call/", {
+      const vobizRes = await fetch("https://api.vobiz.ai/api/v1/Account/" + telConfig.vobizAuthId + "/Call/", {
         method: "POST",
         headers: {
           "Authorization": "Basic " + Buffer.from(`${telConfig.vobizAuthId}:${telConfig.vobizAuthToken}`).toString("base64"),

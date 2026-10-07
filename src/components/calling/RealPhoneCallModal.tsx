@@ -189,6 +189,13 @@ export function RealPhoneCallModal({
   };
 
   const handleEndCall = () => {
+    if (activeCallId) {
+      fetch(`/api/calls/${encodeURIComponent(activeCallId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "user_hangup" }),
+      }).catch((err) => console.warn("[END_CALL_ERROR]", err));
+    }
     setCallState("ended");
   };
 

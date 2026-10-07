@@ -215,7 +215,7 @@ function calculateRms(mulawBuffer) {
   return Math.sqrt(sum / mulawBuffer.length);
 }
 
-let sarvamQuotaExhaustedUntil = Date.now() + 24 * 60 * 60 * 1000; // Auto-bypass exhausted Sarvam 402 to ultra-fast Whisper
+let sarvamQuotaExhaustedUntil = 0; // Auto-bypass exhausted Sarvam 402 to ultra-fast Whisper if 402 is received
 
 async function transcribeAudio(mulawBuffer) {
   const pcm16 = mulawToPcm16(mulawBuffer);

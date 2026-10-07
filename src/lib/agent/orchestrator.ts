@@ -314,8 +314,8 @@ export class AgentOrchestrator {
       });
 
       // Resilient Auto-Fallback on 429 (Rate limit)
-      if (!response.ok && response.status === 429 && modelToUse !== "groq/compound-mini") {
-        console.warn(`[ORCHESTRATOR_RETRY] Model ${modelToUse} rate limited (429), retrying with groq/compound-mini...`);
+      if (!response.ok && response.status === 429 && modelToUse !== "openai/gpt-oss-20b") {
+        console.warn(`[ORCHESTRATOR_RETRY] Model ${modelToUse} rate limited (429), retrying with openai/gpt-oss-20b...`);
         response = await fetch(endpoint, {
           method: "POST",
           headers: {
@@ -323,7 +323,7 @@ export class AgentOrchestrator {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "groq/compound-mini",
+            model: "openai/gpt-oss-20b",
             messages,
             temperature: 0.3,
             max_tokens: 180,
