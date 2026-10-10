@@ -18,10 +18,11 @@ import {
 import { Header } from "@/components/layout/Header";
 import { TestAgentModal } from "@/components/testing/TestAgentModal";
 import { RealPhoneCallModal } from "@/components/calling/RealPhoneCallModal";
-import { dataStore, AgentItem } from "@/lib/db/store";
+import { AgentItem } from "@/lib/db/store";
 
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<AgentItem[]>(dataStore.getAgents());
+  const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string; cartesiaVoiceId?: string } | undefined>();
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
@@ -31,16 +32,21 @@ export default function AgentsPage() {
   const [isRealCallOpen, setIsRealCallOpen] = useState(false);
 
   // Sync with API on mount
-  React.useEffect(() => {
-    fetch("/api/agents")
+  const refreshAgents = React.useCallback(() => {
+    return fetch("/api/agents")
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.agents)) {
           setAgents(data.agents);
         }
       })
-      .catch((err) => console.error("Error fetching agents:", err));
+      .catch((err) => console.error("Error fetching agents:", err))
+      .finally(() => setIsLoading(false));
   }, []);
+
+  React.useEffect(() => {
+    refreshAgents();
+  }, [refreshAgents]);
 
   const filteredAgents = agents.filter(
     (a) =>
@@ -71,18 +77,13 @@ export default function AgentsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        dataStore.updateAgent(agentId, { status: newStatus as AgentItem["status"] });
         showToast(`Agent "${target.name}" is now ${newStatus === "ACTIVE" ? "Active" : "Paused"}`);
       } else {
-        setAgents((prev) =>
-          prev.map((a) => (a.id === agentId ? { ...a, status: target.status } : a))
-        );
+        await refreshAgents();
         showToast("Error updating status: " + (data.error || "Failed"));
       }
     } catch {
-      setAgents((prev) =>
-        prev.map((a) => (a.id === agentId ? { ...a, status: target.status } : a))
-      );
+      await refreshAgents();
       showToast("Network error updating status");
     }
   };
@@ -201,8 +202,13 @@ export default function AgentsPage() {
           </div>
         </div>
 
-        {/* Empty State */}
-        {filteredAgents.length === 0 && (
+        {/* Loading & Empty State */}
+        {isLoading ? (
+          <div className="p-12 text-center rounded-3xl bg-white border border-[#EAEBE8] space-y-3 shadow-xs">
+            <div className="w-8 h-8 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin mx-auto" />
+            <p className="text-xs text-slate-500 font-medium">Loading AI voice agents...</p>
+          </div>
+        ) : filteredAgents.length === 0 ? (
           <div className="p-12 text-center rounded-3xl bg-white border border-[#EAEBE8] space-y-4 shadow-xs">
             <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 mx-auto flex items-center justify-center">
               <Bot className="w-6 h-6" />
@@ -219,7 +225,7 @@ export default function AgentsPage() {
               <span>Create Agent</span>
             </Link>
           </div>
-        )}
+        ) : null}
 
         {/* Agents Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

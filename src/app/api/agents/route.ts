@@ -388,29 +388,11 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE() {
-  try {
-    try {
-      await prisma.agent.updateMany({ data: { phoneNumberId: null, businessId: null } });
-      await prisma.call.updateMany({ data: { agentId: null } });
-      await prisma.campaignLead.deleteMany();
-      await prisma.campaign.deleteMany();
-      await prisma.agentVersion.deleteMany();
-      await prisma.agentKnowledge.deleteMany();
-      await prisma.agentTool.deleteMany();
-      await prisma.agent.deleteMany();
-    } catch (dbErr) {
-      console.warn("DB agent deletion warning:", dbErr);
-    }
-
-    dataStore.clearAllAgents();
-    agentRuntimeCache.clear();
-    return NextResponse.json({ success: true, message: "All agents removed", agents: [] });
-  } catch (err: unknown) {
-    dataStore.clearAllAgents();
-    agentRuntimeCache.clear();
-    return NextResponse.json(
-      { success: false, error: err instanceof Error ? err.message : "Internal error" },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Bulk deletion of all agents is disabled for safety. Please delete agents individually via DELETE /api/agents/[id].",
+    },
+    { status: 405 }
+  );
 }

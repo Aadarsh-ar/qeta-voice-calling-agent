@@ -5,6 +5,7 @@ import { agentRuntimeCache } from "@/lib/agent/agentRuntimeCache";
 import { isValidVoiceId, DEFAULT_VOICE_ID, AVAILABLE_VOICES, getVoiceName } from "@/lib/config/voices";
 import { compileAgentInstructions, compileAgentGreeting } from "@/lib/agent/promptCompiler";
 import { createAgentVersion } from "@/lib/agent/versionService";
+import { resolveOrgContext } from "@/lib/auth/orgContext";
 
 export async function GET(
   req: Request,
@@ -163,6 +164,11 @@ export async function PUT(
 
     if (!dbAgent && !currentAgent) {
       return NextResponse.json({ success: false, error: "Agent not found" }, { status: 404 });
+    }
+
+    const orgResult = await resolveOrgContext(req);
+    if (!("error" in orgResult) && dbAgent?.organizationId && dbAgent.organizationId !== orgResult.organizationId) {
+      return NextResponse.json({ success: false, error: "Unauthorized: Access denied for this organization" }, { status: 403 });
     }
 
     const resolvedId = dbAgent?.id || id;
@@ -366,12 +372,17 @@ export async function DELETE(
         where: {
           OR: [{ id: cleanId }, { cartesiaAgentId: cleanId }],
         },
-        select: { id: true, cartesiaAgentId: true },
+        select: { id: true, cartesiaAgentId: true, organizationId: true },
       });
       if (dbAgent) {
         resolvedDbId = dbAgent.id;
+        const orgResult = await resolveOrgContext(_req);
+        if (!("error" in orgResult) && dbAgent.organizationId && dbAgent.organizationId !== orgResult.organizationId) {
+          return NextResponse.json({ success: false, error: "Unauthorized: Access denied for this organization" }, { status: 403 });
+        }
       }
-    } catch (lookupErr) {
+    } catch (lookupErr: any) {
+      if (lookupErr?.status === 403) throw lookupErr;
       console.warn("[AGENT_DELETE] DB lookup warning:", lookupErr);
     }
 

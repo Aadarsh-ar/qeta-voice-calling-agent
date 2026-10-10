@@ -64,6 +64,7 @@ export function RealPhoneCallModal({
     domain?: string;
   } | null>(null);
   const [copiedIp, setCopiedIp] = useState(false);
+  const [isEndingCall, setIsEndingCall] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -129,6 +130,7 @@ export function RealPhoneCallModal({
   if (!isOpen) return null;
 
   const handleInitiateCall = async () => {
+    if (isCalling || callState !== "idle") return;
     setErrorMessage(null);
     setCarrierInfo(null);
     setLiveTranscript("");
@@ -188,15 +190,22 @@ export function RealPhoneCallModal({
     }
   };
 
-  const handleEndCall = () => {
+  const handleEndCall = async () => {
+    if (isEndingCall || callState === "ended") return;
+    setIsEndingCall(true);
     if (activeCallId) {
-      fetch(`/api/calls/${encodeURIComponent(activeCallId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "user_hangup" }),
-      }).catch((err) => console.warn("[END_CALL_ERROR]", err));
+      try {
+        await fetch(`/api/calls/${encodeURIComponent(activeCallId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "user_hangup" }),
+        });
+      } catch (err) {
+        console.warn("[END_CALL_ERROR]", err);
+      }
     }
     setCallState("ended");
+    setIsEndingCall(false);
   };
 
   const formatTimer = (secs: number) => {
@@ -452,10 +461,11 @@ export function RealPhoneCallModal({
                 <button
                   type="button"
                   onClick={handleEndCall}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition"
+                  disabled={isEndingCall}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-md shadow-rose-600/20 transition"
                 >
                   <PhoneOff className="w-4 h-4" />
-                  End Call
+                  {isEndingCall ? "Ending..." : "End Call"}
                 </button>
               </div>
             </div>

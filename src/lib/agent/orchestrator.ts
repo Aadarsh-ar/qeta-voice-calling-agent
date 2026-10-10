@@ -46,8 +46,8 @@ export class AgentOrchestrator {
   getGroqApiKey(): string {
     return (
       this.groqApiKey ||
-      (typeof process !== "undefined" && process.env.GROQ_API_KEY) ||
-      ["g", "s", "k", "_", "td5cz", "bbgwt0Q", "xoOrIv", "KeWGdy", "b3FYsAom", "KFve2Sdr", "LOBOUG2z", "OLgk"].join("")
+      (typeof process !== "undefined" ? process.env.GROQ_API_KEY : undefined) ||
+      ""
     );
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Zap,
   PhoneCall,
@@ -32,62 +32,47 @@ interface LeadItem {
   time: string;
 }
 
+interface AgentOption {
+  id: string;
+  name: string;
+  language?: string;
+}
+
 export default function InstantLeadsPage() {
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState("");
   const [leadName, setLeadName] = useState("");
   const [leadPhone, setLeadPhone] = useState("");
   const [leadSource, setLeadSource] = useState("Meta Ads (Facebook/Insta)");
-  const [selectedAgent, setSelectedAgent] = useState("cmu40722800014r20hvl070n3");
   const [notes, setNotes] = useState("Interested in 3BHK Gated Villa near Financial District");
   const [isCalling, setIsCalling] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const [recentLeads, setRecentLeads] = useState<LeadItem[]>([
-    {
-      id: "LEAD-901",
-      name: "Srinivas Rao",
-      phone: "+91 98480 22331",
-      source: "Meta Ads (Hyd)",
-      employee: "Harika (Telugu Cloned)",
-      status: "QUALIFIED",
-      intent: "Site Visit Confirmed this Saturday 11 AM",
-      time: "2 mins ago",
-    },
-    {
-      id: "LEAD-902",
-      name: "Kavitha Reddy",
-      phone: "+91 99890 44552",
-      source: "Website Form",
-      employee: "Harika (Telugu Cloned)",
-      status: "FOLLOW_UP",
-      intent: "Asked for brochure on WhatsApp first",
-      time: "14 mins ago",
-    },
-    {
-      id: "LEAD-903",
-      name: "Vikram Malhotra",
-      phone: "+91 98112 33445",
-      source: "Google Search Ads",
-      employee: "Rahul (Support/Sales)",
-      status: "QUALIFIED",
-      intent: "Ready for pricing quotation discussion",
-      time: "28 mins ago",
-    },
-    {
-      id: "LEAD-904",
-      name: "Anand Verma",
-      phone: "+91 97001 88990",
-      source: "IndiaMART",
-      employee: "Sneha (Renewal)",
-      status: "NO_ANSWER",
-      intent: "Auto-retry scheduled in 15 mins",
-      time: "45 mins ago",
-    },
-  ]);
+  useEffect(() => {
+    async function loadAgents() {
+      try {
+        const res = await fetch("/api/agents");
+        const data = await res.json();
+        if (data.success && Array.isArray(data.agents) && data.agents.length > 0) {
+          setAgents(data.agents);
+          setSelectedAgent(data.agents[0].id);
+        }
+      } catch (err) {
+        console.warn("Failed to load agents for instant leads:", err);
+      }
+    }
+    loadAgents();
+  }, []);
+
+  const [recentLeads, setRecentLeads] = useState<LeadItem[]>([]);
 
   const handleTriggerCall = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!leadPhone) return;
+
+    const assignedAgentObj = agents.find((a) => a.id === selectedAgent);
+    const assignedAgentName = assignedAgentObj?.name || "AI Voice Agent";
 
     setIsCalling(true);
     try {
@@ -112,7 +97,7 @@ export default function InstantLeadsPage() {
         name: leadName || "Direct Lead",
         phone: formattedPhone,
         source: leadSource,
-        employee: "Harika (Telugu Cloned)",
+        employee: assignedAgentName,
         status: "DIALING",
         intent: notes || "Initial Inquiry Qualification",
         time: "Just now",
@@ -249,9 +234,15 @@ export default function InstantLeadsPage() {
                     onChange={(e) => setSelectedAgent(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                   >
-                    <option value="cmu40722800014r20hvl070n3">Harika — Lead Qualification (Telugu/Tenglish)</option>
-                    <option value="cmu40722800024r20hvl070n4">Rahul — Customer Support & Inquiry (English)</option>
-                    <option value="cmu40722800034r20hvl070n5">Sneha — Tele-sales & Payment Renewal</option>
+                    {agents.length === 0 ? (
+                      <option value="">No agents found</option>
+                    ) : (
+                      agents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.language || "Telugu / English"})
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
@@ -370,7 +361,14 @@ export default function InstantLeadsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {recentLeads.map((lead) => (
+                {recentLeads.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-12 text-center text-slate-400 text-xs">
+                      No inbound leads processed yet. Trigger a lead call above to see live qualification results.
+                    </td>
+                  </tr>
+                ) : (
+                  recentLeads.map((lead) => (
                   <tr key={lead.id} className="hover:bg-slate-50/80 transition">
                     <td className="px-6 py-4">
                       <p className="font-bold text-slate-900 text-sm">{lead.name}</p>
@@ -413,7 +411,7 @@ export default function InstantLeadsPage() {
                     </td>
                     <td className="px-6 py-4 text-right text-slate-400 font-mono text-[11px]">{lead.time}</td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>

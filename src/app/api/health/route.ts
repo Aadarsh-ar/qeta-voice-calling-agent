@@ -21,8 +21,8 @@ export async function GET() {
   try {
     const livekitUrl = process.env.LIVEKIT_URL || "wss://ai-voice-agent-44qkuva3.livekit.cloud";
     const livekitHost = livekitUrl.replace(/^wss:\/\//, "https://");
-    const apiKey = process.env.LIVEKIT_API_KEY || "API6S2vyxFt6xvW";
-    const apiSecret = process.env.LIVEKIT_API_SECRET || "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG";
+    const apiKey = process.env.LIVEKIT_API_KEY || "";
+    const apiSecret = process.env.LIVEKIT_API_SECRET || "";
     const rsc = new RoomServiceClient(livekitHost, apiKey, apiSecret);
     const rooms = await rsc.listRooms();
     checks.livekit = {
@@ -39,8 +39,8 @@ export async function GET() {
   const { DEFAULT_TELEPHONY_CONFIG } = await import("@/lib/config/telephony");
   const hasCartesia = !!(process.env.CARTESIA_API_KEY || DEFAULT_TELEPHONY_CONFIG.cartesiaApiKey);
   const hasGroq = !!(process.env.GROQ_API_KEY || DEFAULT_TELEPHONY_CONFIG.groqApiKey);
-  const hasDeepgram = !!(process.env.DEEPGRAM_API_KEY || "5cfc51075cbd0dd63e8cd8b46cc240eed660551d");
-  const hasLivekit = !!(process.env.LIVEKIT_API_KEY || "API6S2vyxFt6xvW");
+  const hasDeepgram = !!process.env.DEEPGRAM_API_KEY;
+  const hasLivekit = !!process.env.LIVEKIT_API_KEY;
 
   checks.config = {
     status: hasCartesia && hasGroq && hasDeepgram && hasLivekit ? "HEALTHY" : "DEGRADED",
