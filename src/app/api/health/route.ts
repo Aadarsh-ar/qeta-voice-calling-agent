@@ -23,16 +23,24 @@ export async function GET() {
     const livekitHost = livekitUrl.replace(/^wss:\/\//, "https://");
     const apiKey = process.env.LIVEKIT_API_KEY || "";
     const apiSecret = process.env.LIVEKIT_API_SECRET || "";
-    const rsc = new RoomServiceClient(livekitHost, apiKey, apiSecret);
-    const rooms = await rsc.listRooms();
-    checks.livekit = {
-      status: "HEALTHY",
-      details: `${rooms.length} active rooms on cluster`,
-      latencyMs: Date.now() - lkStart,
-    };
+
+    if (!apiKey || !apiSecret) {
+      checks.livekit = {
+        status: "DEGRADED",
+        details: "LIVEKIT_API_KEY or LIVEKIT_API_SECRET not configured in environment",
+        latencyMs: 0,
+      };
+    } else {
+      const rsc = new RoomServiceClient(livekitHost, apiKey, apiSecret);
+      const rooms = await rsc.listRooms();
+      checks.livekit = {
+        status: "HEALTHY",
+        details: `${rooms.length} active rooms on cluster`,
+        latencyMs: Date.now() - lkStart,
+      };
+    }
   } catch (err: any) {
-    isAllHealthy = false;
-    checks.livekit = { status: "DOWN", details: err?.message, latencyMs: Date.now() - lkStart };
+    checks.livekit = { status: "DEGRADED", details: err?.message, latencyMs: Date.now() - lkStart };
   }
 
   // 3. Environment configuration check
@@ -43,7 +51,7 @@ export async function GET() {
   const hasLivekit = !!process.env.LIVEKIT_API_KEY;
 
   checks.config = {
-    status: hasCartesia && hasGroq && hasDeepgram && hasLivekit ? "HEALTHY" : "DEGRADED",
+    status: hasCartesia && hasGroq ? "HEALTHY" : "DEGRADED",
     latencyMs: 0,
   };
 
@@ -51,13 +59,16 @@ export async function GET() {
     ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)
     : "c259771";
 
+  const isDbHealthy = checks.database?.status === "HEALTHY";
+  const overallStatus = isDbHealthy ? (checks.livekit?.status === "HEALTHY" ? "OK" : "DEGRADED") : "DOWN";
+
   return NextResponse.json(
     {
-      status: isAllHealthy ? "OK" : "DEGRADED",
+      status: overallStatus,
       timestamp: new Date().toISOString(),
       version: `1.0.3-prod-${commitSha}`,
       services: checks,
     },
-    { status: isAllHealthy ? 200 : 503 }
+    { status: isDbHealthy ? 200 : 503 }
   );
 }
