@@ -24,10 +24,12 @@ import {
   X,
   Volume2,
   ShieldCheck,
+  Square,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { TestAgentModal } from "@/components/testing/TestAgentModal";
 import { LiveAgentAudioModal } from "@/components/landing/LiveAgentAudioModal";
+import { playVoicePreviewSample, stopAudio } from "@/lib/audio/player";
 
 interface AgentTemplate {
   id: string;
@@ -257,6 +259,7 @@ export default function TemplatesPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<AgentTemplate | null>(null);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
+  const [auditioningId, setAuditioningId] = useState<string | null>(null);
 
   // Live Mic Voice Test Modal state
   const [isVoiceTestOpen, setIsVoiceTestOpen] = useState<boolean>(false);
@@ -472,15 +475,40 @@ export default function TemplatesPage() {
                         Opening Voice Greeting
                       </span>
                       <button
-                        onClick={() => setIsAudioModalOpen(true)}
-                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
+                        onClick={() => {
+                          if (auditioningId === tpl.id) {
+                            stopAudio();
+                            setAuditioningId(null);
+                          } else {
+                            setAuditioningId(tpl.id);
+                            playVoicePreviewSample(tpl.voiceId, {
+                              customText: tpl.openingGreeting,
+                              onEnded: () => setAuditioningId(null),
+                              onError: () => setAuditioningId(null),
+                            });
+                          }
+                        }}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 transition cursor-pointer ${
+                          auditioningId === tpl.id
+                            ? "bg-emerald-700 text-white animate-pulse"
+                            : "text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100"
+                        }`}
                       >
-                        <Play className="w-2.5 h-2.5 fill-current" />
-                        Audition
+                        {auditioningId === tpl.id ? (
+                          <>
+                            <Square className="w-2.5 h-2.5 fill-current" />
+                            <span>Stop</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>Audition Voice</span>
+                          </>
+                        )}
                       </button>
                     </div>
                     <p className="text-xs font-medium text-slate-800 italic leading-relaxed line-clamp-2">
-                      "{tpl.openingGreeting}"
+                      &quot;{tpl.openingGreeting}&quot;
                     </p>
                   </div>
 
@@ -490,7 +518,7 @@ export default function TemplatesPage() {
                       🗣️ {tpl.language}
                     </span>
                     <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
-                      🎙️ AD Cloned Voice
+                      🎙️ {tpl.voiceName}
                     </span>
                     <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700">
                       ⚡ {tpl.tools.length} Tools
@@ -562,7 +590,8 @@ export default function TemplatesPage() {
         isOpen={isAudioModalOpen}
         onClose={() => setIsAudioModalOpen(false)}
         agentId="agent_WzcEn6kkRmPxAfBNHzvpa1"
-        agentName="Sam (Voice Intelligence Agent)"
+        agentName="Priya (AI Voice Assistant · qetadotin)"
+        cartesiaVoiceId="480e1f44-cdab-4777-851a-236e06b04672"
       />
 
       {/* Inspect Template System Prompt & Tools Modal */}

@@ -33,6 +33,7 @@ import { RealPhoneCallModal } from "@/components/calling/RealPhoneCallModal";
 import { AgentItem, dataStore } from "@/lib/db/store";
 import { AgentStatus, AgentLanguage } from "@/lib/types/models";
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID, isValidVoiceId, getVoiceName } from "@/lib/config/voices";
+import { playVoicePreviewSample, stopAudio } from "@/lib/audio/player";
 
 export default function AgentDetailPage({
   params,
@@ -71,6 +72,7 @@ export default function AgentDetailPage({
   const [cartesiaVoiceId, setCartesiaVoiceId] = useState(
     agent?.cartesiaVoiceId || DEFAULT_VOICE_ID
   );
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStep, setSaveStep] = useState<"idle" | "saving" | "syncing" | "ready" | "error">("idle");
   const [syncStatus, setSyncStatus] = useState<{
@@ -824,19 +826,45 @@ export default function AgentDetailPage({
                       <span className="text-slate-900 font-semibold">Ultra-Low Latency Neural Stream</span>
                     </div>
                     <div className="flex flex-col py-1.5 border-b border-slate-200 gap-1.5">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <span className="text-slate-500">Assigned Voice:</span>
-                        <select
-                          value={cartesiaVoiceId}
-                          onChange={(e) => setCartesiaVoiceId(e.target.value)}
-                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
-                        >
-                          {AVAILABLE_VOICES.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.displayName}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={cartesiaVoiceId}
+                            onChange={(e) => setCartesiaVoiceId(e.target.value)}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 font-semibold text-xs focus:outline-none focus:border-indigo-500"
+                          >
+                            {AVAILABLE_VOICES.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.displayName}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isPlayingVoice) {
+                                stopAudio();
+                                setIsPlayingVoice(false);
+                              } else {
+                                setIsPlayingVoice(true);
+                                playVoicePreviewSample(cartesiaVoiceId, {
+                                  onEnded: () => setIsPlayingVoice(false),
+                                  onError: () => setIsPlayingVoice(false),
+                                });
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                              isPlayingVoice
+                                ? "bg-emerald-700 text-white animate-pulse"
+                                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            }`}
+                            title="Audition selected voice live"
+                          >
+                            <Play className="w-3 h-3 fill-current" />
+                            <span>{isPlayingVoice ? "Stop" : "Test Voice"}</span>
+                          </button>
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
                         <span>Cartesia Voice ID:</span>

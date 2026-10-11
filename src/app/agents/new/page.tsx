@@ -20,10 +20,15 @@ import {
   Calendar,
   Headphones,
   SlidersHorizontal,
+  Play,
+  Square,
+  Volume2,
+  Loader2,
 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { AgentLanguage } from "@/lib/types/models";
-import { AVAILABLE_VOICES, isValidVoiceId } from "@/lib/config/voices";
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID, isValidVoiceId } from "@/lib/config/voices";
+import { playVoicePreviewSample, stopAudio } from "@/lib/audio/player";
 
 interface Preset {
   id: string;
@@ -98,7 +103,8 @@ export default function CreateAgentPage() {
   const [language, setLanguage] = useState<AgentLanguage>(AgentLanguage.TELUGU_ENGLISH);
   const [systemPrompt, setSystemPrompt] = useState(PRESETS[0].prompt);
   const [cartesiaAgentId, setCartesiaAgentId] = useState("");
-  const [cartesiaVoiceId, setCartesiaVoiceId] = useState("41508a7d-4839-445f-ba7f-687f620ed0e7");
+  const [cartesiaVoiceId, setCartesiaVoiceId] = useState(DEFAULT_VOICE_ID);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [selectedPhoneNumber, setSelectedPhoneNumber] = useState("+91 80 7158 2667");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStep, setSaveStep] = useState<"idle" | "saving" | "syncing" | "ready" | "error">("idle");
@@ -326,11 +332,27 @@ export default function CreateAgentPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-1.5">
                 {AVAILABLE_VOICES.map((v) => {
                   const isSelected = cartesiaVoiceId === v.id;
+                  const isVoicePlaying = playingVoiceId === v.id;
+
+                  const handleTestVoice = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    if (isVoicePlaying) {
+                      stopAudio();
+                      setPlayingVoiceId(null);
+                    } else {
+                      setPlayingVoiceId(v.id);
+                      playVoicePreviewSample(v.id, {
+                        onEnded: () => setPlayingVoiceId(null),
+                        onError: () => setPlayingVoiceId(null),
+                      });
+                    }
+                  };
+
                   return (
                     <div
                       key={v.id}
                       onClick={() => setCartesiaVoiceId(v.id)}
-                      className={`p-3.5 rounded-xl border text-left cursor-pointer transition flex flex-col justify-between space-y-2 ${
+                      className={`p-3.5 rounded-xl border text-left cursor-pointer transition flex flex-col justify-between space-y-3 ${
                         isSelected
                           ? "bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20 shadow-xs"
                           : "bg-slate-50/70 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
@@ -347,10 +369,34 @@ export default function CreateAgentPage() {
                         </div>
                         <p className="text-[11px] text-slate-500 mt-1 leading-snug">{v.description}</p>
                       </div>
-                      <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                        <span className="font-mono text-slate-400">{v.model}</span>
+
+                      {/* Audition Play Button */}
+                      <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={handleTestVoice}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                            isVoicePlaying
+                              ? "bg-emerald-700 text-white animate-pulse"
+                              : "bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300/80 hover:border-emerald-500"
+                          }`}
+                          title={`Listen to sample of ${v.name}`}
+                        >
+                          {isVoicePlaying ? (
+                            <>
+                              <Square className="w-2.5 h-2.5 fill-current" />
+                              <span>Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-2.5 h-2.5 fill-current" />
+                              <span>Test Voice</span>
+                            </>
+                          )}
+                        </button>
+
                         {isSelected && (
-                          <span className="font-bold text-emerald-700 flex items-center gap-1">
+                          <span className="font-bold text-emerald-700 flex items-center gap-1 text-[10px]">
                             <CheckCircle2 className="w-3 h-3" /> Selected
                           </span>
                         )}

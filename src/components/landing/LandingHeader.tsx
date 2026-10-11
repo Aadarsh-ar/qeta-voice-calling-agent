@@ -55,7 +55,7 @@ export function LandingHeader({ onOpenTestAgent }: LandingHeaderProps) {
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100/80 transition cursor-pointer"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-              <span>Test Live Agent</span>
+              <span>Talk to Priya</span>
             </button>
           )}
           <Link

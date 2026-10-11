@@ -74,7 +74,7 @@ export default function HomePage() {
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
                 </Link>
 
-                {/* Secondary CTA (Interactive Voice Chat Test Agent) */}
+                {/* Secondary CTA (Interactive Voice Chat Test Agent - Priya) */}
                 <button
                   type="button"
                   onClick={handleOpenAudioModal}
@@ -83,10 +83,10 @@ export default function HomePage() {
                   <span className="w-6 h-6 rounded-full bg-emerald-100/90 text-emerald-800 flex items-center justify-center shrink-0 -ml-1 transition-transform group-hover:scale-105">
                     <Mic className="w-3.5 h-3.5 text-emerald-700" />
                   </span>
-                  <span>Test live agent</span>
+                  <span>Talk to Priya</span>
                   <span className="ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                    Voice Chat
+                    AI Assistant
                   </span>
                 </button>
               </div>

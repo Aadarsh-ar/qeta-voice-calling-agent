@@ -36,20 +36,22 @@ interface LiveAgentAudioModalProps {
   agentId?: string;
   agentName?: string;
   initialGreeting?: string;
+  cartesiaVoiceId?: string;
 }
 
 const DEFAULT_AGENT_ID = "agent_WzcEn6kkRmPxAfBNHzvpa1";
-const DEFAULT_AGENT_NAME = "Sam (AI Voice Agent)";
+const DEFAULT_AGENT_NAME = "Priya (AI Voice Assistant · qetadotin)";
+const DEFAULT_VOICE_ID = "480e1f44-cdab-4777-851a-236e06b04672";
 const DEFAULT_GREETING =
-  "హాయ్! నేను సామ్, qwetadotin యొక్క AI Voice Agent. నాతో ఏదైనా మాట్లాడండి — qwetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు.";
+  "హలో అండి! నేను ప్రియ, qetadotin యొక్క AI Voice Assistant ని. నాతో ఏదైనా మాట్లాడండి — qetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు. మీకు ఎలా సహాయం చేయగలను?";
 
 const QUICK_STARTERS = [
-  "qwetadotin అంటే ఏమిటి?",
+  "qetadotin అంటే ఏమిటి?",
   "నువ్వు ఏం చేయగలవు?",
   "ఒక business scenario try చేద్దాం",
-  "నేను ఒక restaurant owner",
+  "నేను ఒక real estate business run చేస్తున్నాను",
   "నువ్వు మనిషివా?",
-  "Pricing details చెప్పండి",
+  "Pricing plans వివరాలు చెప్పండి",
 ];
 
 function base64ToWavBlob(base64: string, sampleRate = 16000): Blob {
@@ -103,6 +105,7 @@ export function LiveAgentAudioModal({
   agentId = DEFAULT_AGENT_ID,
   agentName = DEFAULT_AGENT_NAME,
   initialGreeting = DEFAULT_GREETING,
+  cartesiaVoiceId = DEFAULT_VOICE_ID,
 }: LiveAgentAudioModalProps) {
   const [inputText, setInputText] = useState("");
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -298,7 +301,7 @@ export function LiveAgentAudioModal({
       body: JSON.stringify({
         agentId,
         agentName,
-        cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+        cartesiaVoiceId: cartesiaVoiceId || DEFAULT_VOICE_ID,
         ttsOnly: true,
         textToSpeak: greetingText,
       }),
@@ -380,7 +383,7 @@ export function LiveAgentAudioModal({
         body: JSON.stringify({
           agentId,
           agentName,
-          cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+          cartesiaVoiceId: cartesiaVoiceId || DEFAULT_VOICE_ID,
           userMessage: cleanText,
           conversationHistory: history,
         }),
@@ -564,7 +567,7 @@ export function LiveAgentAudioModal({
         body: JSON.stringify({
           agentId,
           agentName,
-          cartesiaVoiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
+          cartesiaVoiceId: cartesiaVoiceId || DEFAULT_VOICE_ID,
           ttsOnly: true,
           textToSpeak: greetingText,
         }),
@@ -697,7 +700,7 @@ export function LiveAgentAudioModal({
           <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs text-amber-900 font-medium shrink-0 animate-in fade-in">
             <div className="flex items-center gap-2">
               <Volume2 className="w-4 h-4 text-amber-700 animate-bounce" />
-              <span>Audio autoplay was paused by your browser. Click to hear Sam speak:</span>
+              <span>Audio autoplay was paused by your browser. Click to hear Priya speak:</span>
             </div>
             <button
               type="button"
@@ -711,7 +714,7 @@ export function LiveAgentAudioModal({
               }}
               className="px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-xs transition cursor-pointer shrink-0"
             >
-              Play Voice
+              Play Priya's Voice
             </button>
           </div>
         )}
@@ -728,7 +731,7 @@ export function LiveAgentAudioModal({
                 <span className="w-1 bg-emerald-600 rounded-full animate-eq-2" />
               </div>
               <span className="font-semibold text-emerald-900">
-                Sam is speaking live audio via Cartesia Neural Voice
+                Priya is speaking live audio via Cartesia Neural Voice
               </span>
             </div>
             <button

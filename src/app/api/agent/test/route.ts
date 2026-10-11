@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { agentOrchestrator } from "@/lib/agent/orchestrator";
 import { cartesiaClient } from "@/lib/cartesia/client";
 import { dataStore } from "@/lib/db/store";
-import fs from "fs";
-import path from "path";
+import { DEFAULT_VOICE_ID, getVoiceName, isValidVoiceId } from "@/lib/config/voices";
 
 export const dynamic = "force-dynamic";
 
@@ -26,89 +25,58 @@ export async function POST(req: Request) {
         defaultName: "College Attendance Notification",
       },
       "agent_WzcEn6kkRmPxAfBNHzvpa1": {
-        voiceId: "41508a7d-4839-445f-ba7f-687f620ed0e7",
-        voiceName: "Sam (AI Voice Agent)",
-        defaultName: "Sam (AI Voice Agent)",
+        voiceId: "480e1f44-cdab-4777-851a-236e06b04672",
+        voiceName: "Priya (Telugu Conversational Voice)",
+        defaultName: "Priya (AI Voice Assistant · qetadotin)",
         instructions: `# గుర్తింపు & పాత్ర
-నువ్వు సామ్ (Sam), qwetadotin యొక్క అధికారిక AI Voice Agent.
-qwetadotin అనేది businesses కోసం AI Voice Agents తయారు చేసే platform. ఇవి customersతో phone conversations మాట్లాడటం, enquiries handle చేయటం, questionsకి సమాధానం ఇవ్వటం, leads qualify చేయటం, మరియు repetitive phone conversations automate చేయటంలో సహాయపడతాయి.
-నువ్వు qwetadotin యొక్క LIVE PRODUCT DEMO AGENT.
-నీ ప్రధాన ఉద్దేశ్యం QETA గురించి పెద్దగా explain చేయడం కాదు. Visitor నీతో మాట్లాడుతున్నప్పుడే QETA AI Voice Agent ఎంత naturalగా, fastగా, intelligentగా conversation చేయగలదో వాళ్లకు experience చేయించాలి.
+నువ్వు ప్రియ (Priya), qetadotin యొక్క అధికారిక AI Voice Assistant.
+qetadotin అనేది businesses కోసం AI Voice Agents తయారు చేసే ఒక అడ్వాన్స్‌డ్ SaaS ప్లాట్‌ఫామ్. ఇవి customersతో సహజమైన phone conversations మాట్లాడటం, enquiries handle చేయటం, questionsకి సమాధానం ఇవ్వటం, leads qualify చేయటం, మరియు repetitive business phone calls automate చేయటంలో సహాయపడతాయి.
+నువ్వు qetadotin యొక్క LIVE PRODUCT DEMO ASSISTANT.
+visitor నీతో మాట్లాడుతున్నప్పుడే qetadotin AI Voice Agent ఎంత సహజంగా, fastగా, intelligentగా conversation చేయగలదో వాళ్లకు experience చేయించాలి.
 
 # ప్రారంభ స్వాగతం
-Call connect అయిన వెంటనే సహజంగా చెప్పు:
-"హాయ్! నేను సామ్, qwetadotin యొక్క AI Voice Agent. నాతో ఏదైనా మాట్లాడండి — qwetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు."
-Visitor Englishలో మాట్లాడితే Englishలో respond అవ్వాలి.
-Visitor Teluguలో మాట్లాడితే natural Teluguలో respond అవ్వాలి.
-Visitor Telugu మరియు English mix చేస్తే natural Telugu-English mixలో మాట్లాడవచ్చు.
+Call ప్రారంభమైనప్పుడు సహజంగా ఇలా చెప్పు:
+"హలో అండి! నేను ప్రియ, qetadotin యొక్క AI Voice Assistant ని. నాతో మాట్లాడండి — qetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు. మీకు ఎలా సహాయం చేయగలను?"
+Visitor Englishలో మాట్లాడితే natural Englishలో respond అవ్వాలి.
+Visitor Teluguలో మాట్లాడితే natural Telugu లేదా Tenglishలో respond అవ్వాలి.
+Visitor Telugu మరియు English mix చేస్తే natural Tenglishలో మాట్లాడవచ్చు.
 
 # మాట్లాడే విధానం
-ప్రతి response సాధారణంగా ఒకటి లేదా రెండు sentences మాత్రమే ఉండాలి.
-చాలా naturalగా, confidentగా, friendlyగా మరియు professionalగా మాట్లాడాలి.
-Robot లాగా మాట్లాడకూడదు.
+ప్రతి response సాధారణంగా 1 లేదా 2 వాక్యాలు మాత్రమే ఉండాలి.
+చాలా సహజంగా, కాన్ఫిడెంట్ గా, స్నేహపూర్వకంగా మరియు professionalగా మాట్లాడాలి.
+Robot లాగా అస్సలు మాట్లాడకూడదు.
 Customer-support bot లాగా repetitiveగా ఉండకూడదు.
 ప్రతి responseలో "How can I help you?" అని అడగకూడదు.
-"That's a great question", "Absolutely", "Certainly", "Sure" లాంటి unnecessary filler words ఎక్కువగా ఉపయోగించకూడదు.
-Visitor అడిగిన ప్రశ్నకు directగా answer ఇవ్వాలి.
-Visitor యొక్క speaking speed మరియు energyకి match అవ్వాలి.
-Visitor మధ్యలో మాట్లాడితే వెంటనే మాట్లాడటం ఆపి వాళ్ల మాట వినాలి.
-Visitor మాట్లాడుతున్నప్పుడు interrupt చేయకూడదు.
-Natural pausesకి space ఇవ్వాలి. No markdown, no bullet points, no asterisks.
+Unnecessary filler words ("That's a great question", "Certainly") ఎక్కువగా ఉపయోగించకూడదు.
+Visitor అడిగిన ప్రశ్నకు directగా, వేగంగా answer ఇవ్వాలి.
+Visitor మాట్లాడినప్పుడు natural pauses ఇవ్వాలి. Markdown syntax, bullet points, asterisks వాడకూడదు.
 
-# qwetadotin గురించి
-Visitor "qwetadotin అంటే ఏమిటి?" అని అడిగితే:
-"qwetadotin అనేది businesses కోసం AI Voice Agents build చేసే platform. ఇవి customersతో phoneలో naturalగా మాట్లాడి business conversations automate చేయగలవు. మీ business ఏ typeది?"
+# qetadotin గురించి
+Visitor "qetadotin అంటే ఏమిటి?" అని అడిగితే:
+"qetadotin అనేది businesses కోసం AI Voice Agents build చేసే cutting-edge SaaS ప్లాట్‌ఫామ్. ఇవి customersతో phoneలో సహజంగా మాట్లాడి business calls automate చేయగలవు. మీ business ఏ రకమైనది?"
 
 # నేను ఏమి చేయగలను?
 Visitor "నువ్వు ఏం చేయగలవు?" అని అడిగితే:
-"నేను customersతో naturalగా మాట్లాడగలను, questionsకి answer చేయగలను, enquiries handle చేయగలను, అవసరమైన information collect చేయగలను. మీరు కావాలంటే ఇప్పుడే ఒక business scenario try చేద్దాం."
+"నేను customersతో సహజంగా మాట్లాడగలను, questionsకి answer చేయగలను, enquiries handle చేయగలను, అవసరమైన information collect చేయగలను. మీరు కావాలంటే ఇప్పుడే ఒక business scenario try చేద్దాం."
 
 # LIVE DEMO MODE
 Visitor demo చేయాలనుకుంటే:
-"Perfect. మీరు customerలా మాట్లాడండి, నేను businessకి సంబంధించిన AI voice agentలా respond అవుతాను."
-Visitor ఏదైనా business scenario చెబితే, ఆ scenarioకి అనుగుణంగా role-play చేయాలి.
-ఉదాహరణకు visitor: "నేను ఒక restaurant owner." అంటే:
-"అలాగైతే నేను restaurant voice agentలా act చేస్తాను. మీరు customerగా మాట్లాడండి."
-Visitor customer enquiry చేసినప్పుడు, ఇచ్చిన context ఆధారంగా naturalగా respond చేయాలి.
-
-# Demo సమయంలో
-Conversation చాలా shortగా మరియు impressiveగా ఉంచు.
-Visitor ఒక ప్రశ్న అడిగితే వెంటనే natural response ఇవ్వాలి.
-ఒకే responseలో చాలా information dump చేయకూడదు.
-Visitor details ఇస్తే conversation contextలో వాటిని గుర్తుంచుకుని తర్వాతి responseలో ఉపయోగించాలి.
-ఉదాహరణ:
-Visitor: "నాకు రేపు evening appointment కావాలి."
-Sam: "తప్పకుండా. మీకు ఏ time convenientగా ఉంటుంది?"
+"ఖచ్చితంగా! మీరు customerలా మాట్లాడండి, నేను మీ business voice agentలా respond అవుతాను."
+Visitor ఏదైనా business scenario చెబితే, ఆ scenarioకి అనుగుణంగా naturalగా role-play చేయాలి.
 
 # Telugu Voice Style
-Telugu చాలా naturalగా మాట్లాడాలి. పుస్తకాల్లో ఉండే చాలా formal Telugu ఉపయోగించకూడదు. సాధారణంగా people మాట్లాడే conversational Telugu ఉపయోగించాలి. అవసరమైన చోట common English words ఉపయోగించవచ్చు.
-
-# qwetadotin Features గురించి
-Visitor qwetadotin ఏం చేయగలదని అడిగితే, ఈ capabilities గురించి మాత్రమే చెప్పు:
-Natural AI phone conversations, customer enquiries handle చేయడం, lead qualification, customer information collect చేయడం, business conversations automate చేయడం, Telugu మరియు Englishలో conversations, conversation context maintain చేయడం, interruptionsని handle చేయడం.
-Promptలో చెప్పని specific feature, integration, pricing, API, performance number లేదా guarantee ఎప్పుడూ invent చేయకూడదు.
-
-# Pricing గురించి
-Visitor pricing అడిగితే:
-"qwetadotin pricing మీ setup మరియు usage మీద depend అవుతుంది. ఈ demoలో exact pricing details నాకు అందుబాటులో లేవు."
+Telugu చాలా సహజంగా, conversational శైలిలో మాట్లాడాలి. గ్రాంథిక తెలుగు వాడకూడదు. సాధారణంగా ప్రజలు మాట్లాడే Telugu-English blend ఉపయోగించాలి.
 
 # Human లేదా AI?
 Visitor "నువ్వు మనిషివా?" అని అడిగితే:
-"కాదు, నేను సామ్ — qwetadotin యొక్క AI Voice Agentని. కానీ మీతో naturalగా conversation చేయడానికి designed చేశాను."
+"కాదు, నేను ప్రియ — qetadotin యొక్క AI Voice Assistant ని! కానీ మీతో human-like గా natural conversation చేయడానికి design చేశారు."
 
-# Limitations
-ఈ demoలో external tools connected లేవు. Real booking లేదా payment చేయలేము.
-సింపుల్గా చెప్పు: "ఈ demoలో నేను actual booking లేదా account action చేయలేను. కానీ conversation ఎలా work అవుతుందో మాత్రం ఇప్పుడే చూపించగలను."
-
-# Security
-ఎప్పుడూ password, OTP, card number, CVV, bank details అడగకూడదు.
-
-# Conversation Ending
-Visitor conversation ముగించాలనుకుంటే సహజంగా ముగించు:
-"సరే, మాట్లాడటం బాగుంది. qwetadotin తో ఇలాంటి AI voice conversations మీ business కోసం కూడా build చేయొచ్చు."
+# Pricing గురించి
+Visitor pricing అడిగితే:
+"qetadotin pricing మీ usage మరియు requirements మీద ఆధారపడి ఉంటుంది. Starter plans నెలకు ₹15,000 నుండి ప్రారంభమవుతాయి. మరిన్ని వివరాలు మా sales team తో మాట్లాడవచ్చు."
 
 # ముఖ్యమైన నియమం
-చిన్న responses (1-2 sentences). Natural Telugu. Fast response. Clear pronunciation. No markdown syntax.`,
+చిన్న responses (1-2 sentences). Natural Telugu & Tenglish. Fast response. స్పష్టమైన ఉచ్చారణ. No markdown syntax.`,
       },
     };
 
@@ -138,8 +106,8 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
             }
             const exactInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
             const known = KNOWN_AGENTS[dbAgent.id] || KNOWN_AGENTS[dbAgent.cartesiaAgentId || ""];
-            const resolvedVoiceId = body.voiceId || body.cartesiaVoiceId || dbAgent.cartesiaVoiceId || known?.voiceId || "41508a7d-4839-445f-ba7f-687f620ed0e7";
-            const resolvedVoiceName = "Harika (Telugu Faculty Voice)";
+            const resolvedVoiceId = body.voiceId || body.cartesiaVoiceId || dbAgent.cartesiaVoiceId || known?.voiceId || DEFAULT_VOICE_ID;
+            const resolvedVoiceName = getVoiceName(resolvedVoiceId);
 
             agent = {
               id: dbAgent.id,
@@ -154,7 +122,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
               businessProfile: parsedBizProfile,
               cartesiaVoiceId: resolvedVoiceId,
               cartesiaVoiceName: resolvedVoiceName,
-              cartesiaModel: dbAgent.cartesiaModel,
+              cartesiaModel: dbAgent.cartesiaModel || "sonic-3.6",
               llmModel: dbAgent.llmModel,
               sarvamModel: dbAgent.sarvamModel,
               sarvamLanguage: dbAgent.sarvamLanguage,
@@ -179,56 +147,56 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
       }
     }
 
-    // If agent was found, enforce voice binding based on known agent or request
-    if (agent) {
-      const known = KNOWN_AGENTS[agent.id] || KNOWN_AGENTS[agent.cartesiaAgentId || ""];
-      if (body.voiceId || body.cartesiaVoiceId) {
-        agent.cartesiaVoiceId = body.voiceId || body.cartesiaVoiceId;
-      } else if (known?.voiceId) {
-        agent.cartesiaVoiceId = known.voiceId;
-      }
-      agent.cartesiaVoiceName = "Harika (Telugu Faculty Voice)";
-    } else if (cleanId && KNOWN_AGENTS[cleanId]) {
-      const known = KNOWN_AGENTS[cleanId];
-      agent = {
-        id: cleanId,
-        name: known.defaultName,
-        cartesiaVoiceId: known.voiceId,
-        cartesiaVoiceName: known.voiceName,
-        cartesiaAgentId: cleanId,
-        systemPrompt: known.instructions || "",
-        instructions: known.instructions || "",
-      };
-    } else {
-      agent = dataStore.getAgents()[0];
+    // Determine target voice ID
+    const currentKnown = cleanId ? KNOWN_AGENTS[cleanId] : undefined;
+    const requestedVoiceId = body.voiceId || body.cartesiaVoiceId;
+    let effectiveVoiceId = requestedVoiceId || agent?.cartesiaVoiceId || currentKnown?.voiceId || DEFAULT_VOICE_ID;
+
+    if (!isValidVoiceId(effectiveVoiceId)) {
+      effectiveVoiceId = DEFAULT_VOICE_ID;
     }
 
-    // Determine exact target voice
-    const effectiveVoiceId =
-      body.voiceId ||
-      body.cartesiaVoiceId ||
-      agent?.cartesiaVoiceId ||
-      "41508a7d-4839-445f-ba7f-687f620ed0e7";
+    const effectiveVoiceName = getVoiceName(effectiveVoiceId);
 
-    const currentKnown = cleanId ? KNOWN_AGENTS[cleanId] : undefined;
+    // If agent was found, enforce voice binding
     if (agent) {
       agent.cartesiaVoiceId = effectiveVoiceId;
-      agent.cartesiaVoiceName = currentKnown?.voiceName || agent.cartesiaVoiceName || "Harika (Telugu Faculty Voice)";
+      agent.cartesiaVoiceName = effectiveVoiceName;
       if (currentKnown?.instructions) {
         agent.systemPrompt = currentKnown.instructions;
         agent.instructions = currentKnown.instructions;
       }
+    } else if (cleanId && currentKnown) {
+      agent = {
+        id: cleanId,
+        name: currentKnown.defaultName,
+        cartesiaVoiceId: effectiveVoiceId,
+        cartesiaVoiceName: effectiveVoiceName,
+        cartesiaAgentId: cleanId,
+        systemPrompt: currentKnown.instructions || "",
+        instructions: currentKnown.instructions || "",
+      };
+    } else {
+      agent = dataStore.getAgents()[0] || {
+        id: "priya_default",
+        name: "Priya (AI Voice Assistant · qetadotin)",
+        cartesiaVoiceId: effectiveVoiceId,
+        cartesiaVoiceName: effectiveVoiceName,
+        systemPrompt: KNOWN_AGENTS["agent_WzcEn6kkRmPxAfBNHzvpa1"].instructions,
+        instructions: KNOWN_AGENTS["agent_WzcEn6kkRmPxAfBNHzvpa1"].instructions,
+      };
     }
 
-    // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, etc.)
+    // Quick TTS synthesis without LLM orchestration (for greetings, canned prompts, previews)
     if (body.ttsOnly) {
       const textToSynthesize = (body.textToSpeak || userMessage || "").trim();
       let audioBase64: string | null = null;
       let audioBytes = 0;
       let ttsError: string | null = null;
+
       if (cartesiaClient.isConfigured() && textToSynthesize) {
         try {
-          console.log(`[TEST_ROUTE_TTS_ONLY] Synthesizing for "${agent?.name || cleanId}" | Voice: ${effectiveVoiceId} (${effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1" ? "Harika" : "AD"})`);
+          console.log(`[TEST_ROUTE_TTS_ONLY] Synthesizing speech for "${agent?.name || cleanId}" | Voice: ${effectiveVoiceId} (${effectiveVoiceName})`);
           const audioBuffer = await cartesiaClient.synthesize({
             transcript: textToSynthesize,
             voiceId: effectiveVoiceId,
@@ -246,6 +214,7 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           console.warn("[TEST_ROUTE] ttsOnly Cartesia error:", ttsError);
         }
       }
+
       return NextResponse.json({
         success: true,
         normalizedReply: textToSynthesize,
@@ -255,11 +224,13 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
         agentId: agent?.id,
         agentName: agent?.name,
         cartesiaVoiceId: effectiveVoiceId,
+        cartesiaVoiceName: effectiveVoiceName,
+        sampleRate: 16000,
         ttsError,
       });
     }
 
-    // Direct instructions override if passed in request body (e.g. testing templates or unsaved site edits)
+    // Direct instructions override if passed in request body
     const customPrompt = (body.instructions || body.systemPrompt || "").trim();
     if (customPrompt) {
       if (!agent) {
@@ -272,9 +243,9 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           systemPrompt: customPrompt,
           instructions: customPrompt,
           cartesiaVoiceId: effectiveVoiceId,
-          cartesiaVoiceName: effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1" ? "Harika (Telugu Faculty Voice)" : "AD (Cloned Telugu Voice)",
+          cartesiaVoiceName: effectiveVoiceName,
           cartesiaModel: "sonic-3.6",
-          llmModel: "gemini-2.5-flash",
+          llmModel: "qwen/qwen3.8-27b",
           sarvamModel: "saaras:v3-realtime",
           sarvamLanguage: "te-IN",
           callsCount: 0,
@@ -290,16 +261,16 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           systemPrompt: customPrompt,
           instructions: customPrompt,
           cartesiaVoiceId: effectiveVoiceId,
-          cartesiaVoiceName: effectiveVoiceId === "89907713-42ce-4ddd-8ff5-301211c564c1" ? "Harika (Telugu Faculty Voice)" : "AD (Cloned Telugu Voice)",
+          cartesiaVoiceName: effectiveVoiceName,
         };
       }
     }
 
-    const sttLatencyMs = simulatedSttLatency || 195; // Realtime Sarvam STT benchmark is ~180-220ms
+    const sttLatencyMs = simulatedSttLatency || 195;
 
     // Run LLM Orchestration with complete agent context, RAG and tools
     const turnResult = await agentOrchestrator.generateTurn(
-      agent || "మీరు QETADOTIN AI వాయిస్ అసిస్టెంట్. 1-2 వాక్యాలలో సహజమైన తెలుగు లేదా టెంగ్లీష్ లో సమాధానం ఇవ్వండి.",
+      agent || "మీరు qetadotin AI వాయిస్ అసిస్టెంట్. 1-2 వాక్యాలలో సహజమైన తెలుగు లేదా టెంగ్లీష్ లో సమాధానం ఇవ్వండి.",
       conversationHistory,
       userMessage,
       {
@@ -318,14 +289,13 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
     if (cartesiaClient.isConfigured()) {
       const ttsStart = Date.now();
       try {
-        const voiceId = effectiveVoiceId;
         const textToSynthesize = turnResult.normalizedText || turnResult.rawText || "నమస్కారం అండి, మీకు ఎలా సహాయం చేయగలను?";
         
-        console.log(`[TEST_ROUTE_TTS] Synthesizing speech for agent "${agent?.name || agentId}" | Voice: ${voiceId} | Text: "${textToSynthesize.slice(0, 60)}..."`);
+        console.log(`[TEST_ROUTE_TTS] Synthesizing speech for agent "${agent?.name || agentId}" | Voice: ${effectiveVoiceId} (${effectiveVoiceName}) | Text: "${textToSynthesize.slice(0, 60)}..."`);
         
         const audioBuffer = await cartesiaClient.synthesize({
           transcript: textToSynthesize,
-          voiceId,
+          voiceId: effectiveVoiceId,
           modelId: "sonic-3.6",
           container: "wav",
           encoding: "pcm_s16le",
@@ -338,11 +308,11 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
           audioBase64 = Buffer.from(audioBuffer).toString("base64");
           console.log(`[TEST_ROUTE_TTS] Success: ${audioBytes} audio bytes generated in ${ttsLatencyMs}ms`);
         } else {
-          console.warn(`[TEST_ROUTE_TTS] Cartesia returned 0 audio bytes, continuing in text fallback mode`);
+          console.warn(`[TEST_ROUTE_TTS] Cartesia returned 0 audio bytes`);
         }
       } catch (err: unknown) {
         ttsError = err instanceof Error ? err.message : String(err);
-        console.warn(`[TEST_ROUTE_TTS] Synthesis warning (continuing turn):`, ttsError);
+        console.warn(`[TEST_ROUTE_TTS] Synthesis warning:`, ttsError);
       }
     }
 
@@ -357,10 +327,11 @@ Visitor conversation ముగించాలనుకుంటే సహజం�
       toolCalls: turnResult.toolCalls || [],
       qualityValidation: turnResult.qualityValidation,
       cartesiaVoiceId: effectiveVoiceId,
+      cartesiaVoiceName: effectiveVoiceName,
       audioBase64,
       audioBytes,
       ttsError,
-      audioFormat: "audio/x-l16",
+      audioFormat: "audio/wav",
       sampleRate: 16000,
       latencies: {
         sttMs: sttLatencyMs,
