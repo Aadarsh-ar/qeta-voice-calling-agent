@@ -24,9 +24,9 @@ initializeLogger({ level: "info", pretty: true });
 let loadedVad: any = null;
 async function getVad() {
   if (!loadedVad) {
-    // Latency Optimization: Reduce minimum silence from 0.5s down to 0.28s (44% faster turn-taking)
+    // Ultra-Low Latency Optimization: Reduce minimum silence from 0.5s down to 0.18s (instant turn-taking)
     loadedVad = await silero.VAD.load({
-      minSilenceDuration: 0.28,
+      minSilenceDuration: 0.18,
     });
   }
   return loadedVad;
@@ -275,6 +275,7 @@ Visitor conversation ముగించాలనుకుంటే:
       apiKey: process.env.CARTESIA_API_KEY,
       voice: voiceId,
       model: "sonic-3.6",
+      speed: 1.25, // 0.25x speed increase (1.25x fast speech pacing)
     });
 
     const llmModel = new openai.LLM({

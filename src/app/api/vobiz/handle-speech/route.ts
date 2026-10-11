@@ -99,7 +99,7 @@ LOCATION: Hitec City, Hyderabad | EMAIL: contact@vaani.ai`;
             "Authorization": `Bearer ${bearer}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: 150 }),
+          body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: 50 }),
         });
 
         if (res.ok) {

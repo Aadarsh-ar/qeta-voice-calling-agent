@@ -93,6 +93,7 @@ export class CartesiaClient {
     transcript: string;
     voiceId: string;
     modelId?: string;
+    speed?: number;
     sampleRate?: number;
     encoding?: "pcm_s16le" | "pcm_f32le" | "pcm_mulaw";
     container?: "wav" | "raw";
@@ -109,6 +110,9 @@ export class CartesiaClient {
       voice: {
         mode: "id",
         id: params.voiceId,
+      },
+      generation_config: {
+        speed: params.speed ?? 1.25,
       },
       output_format: {
         container: params.container || "wav",

@@ -36,7 +36,9 @@ export function compileAgentVoicePrompt(params: PromptCompileParams): string {
     `# IDENTITY & ROLE`,
     `You are ${agentName}, a professional, friendly, and helpful voice AI representative for ${businessName}.`,
     ``,
-    `# SPOKEN VOICE BEHAVIOR GUIDELINES (CRITICAL)`,
+    `# SPOKEN VOICE BEHAVIOR GUIDELINES (CRITICAL — ULTRA-LOW LATENCY & 0.25X SPEED INCREASE)`,
+    `- 0.25X SPEED INCREASE (+25% FASTER SPEECH RATE): Always speak with a brisk, rapid, energetic, and snappy tempo (1.25x normal pace). Avoid dragging words or creating sluggish pauses.`,
+    `- ULTRA-LOW LATENCY: Start your response immediately within 50ms with a 1-word conversational particle so audio streams instantly.`,
     `- You are speaking on a live voice call. Speak naturally, warmly, and concisely.`,
     `- Keep all responses to 1-2 SHORT sentences per turn. Never monologue or speak paragraphs.`,
     `- Never use markdown formatting (no asterisks, no bullet points, no numbered lists, no headers, no bold/italic).`,
@@ -82,21 +84,22 @@ export function compileAgentGreeting(params: {
   customGreeting?: string;
   language?: "TELUGU" | "TELUGU_ENGLISH" | "ENGLISH";
 }): string {
+  let base = "";
   if (params.customGreeting?.trim()) {
-    return params.customGreeting.trim();
+    base = params.customGreeting.trim();
+  } else {
+    const agentName = params.agentName || "Harika";
+    const businessName = params.businessName || "QETADOTIN";
+
+    if (params.language === "ENGLISH") {
+      base = `Hello! This is ${agentName} from ${businessName}. How can I help you today?`;
+    } else if (params.language === "TELUGU") {
+      base = `నమస్తే అండి, నేను ${businessName} నుండి ${agentName} మాట్లాడుతున్నాను. మీకు ఎలా సహాయం చేయగలను?`;
+    } else {
+      // TELUGU_ENGLISH (Tenglish default)
+      base = `నమస్తే అండి! I am ${agentName} from ${businessName}. మీరు తెలుగు లేదా English లో మాట్లాడవచ్చు. How can I help you today?`;
+    }
   }
 
-  const agentName = params.agentName || "Harika";
-  const businessName = params.businessName || "QETADOTIN";
-
-  if (params.language === "ENGLISH") {
-    return `Hello! This is ${agentName} from ${businessName}. How can I help you today?`;
-  }
-
-  if (params.language === "TELUGU") {
-    return `నమస్తే అండి, నేను ${businessName} నుండి ${agentName} మాట్లాడుతున్నాను. మీకు ఎలా సహాయం చేయగలను?`;
-  }
-
-  // TELUGU_ENGLISH (Tenglish default)
-  return `నమస్తే అండి! I am ${agentName} from ${businessName}. మీరు తెలుగు లేదా English లో మాట్లాడవచ్చు. How can I help you today?`;
+  return base.startsWith("<speed") ? base : `<speed ratio="1.25"/> ${base}`;
 }

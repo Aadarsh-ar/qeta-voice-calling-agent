@@ -295,18 +295,20 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   const isPureTelugu = dbAgent.language === "TELUGU";
   const ttsLanguage = isEnglish ? "en" : "te";
 
-  // Conversational voice behavior directives ensuring low-latency turns, 1-2 sentence replies, and clean spoken audio
+  // Conversational voice behavior directives ensuring ultra-low latency turns, 0.25x speed increase, and snappy replies
   const spokenVoiceRules = [
-    `[CRITICAL SPOKEN VOICE GUIDELINES]`,
-    `- You are speaking on a live phone call. Keep every response strictly to 1 or 2 natural spoken sentences (under 25 words). Never monologue.`,
+    `[CRITICAL SPOKEN VOICE GUIDELINES — ULTRA-LOW LATENCY & 0.25X SPEED INCREASE]`,
+    `- 0.25X SPEED INCREASE (+25% FASTER SPEECH RATE): Always speak with a brisk, rapid, energetic, and snappy tempo (1.25x normal pace). Avoid dragging words or creating sluggish pauses. Speak cleanly and quickly.`,
+    `- ULTRA-LOW LATENCY (<100MS): Begin your response immediately with a 1-word conversational particle (${isEnglish ? '"Yes", "Sure", "Certainly"' : '"అవునండి", "సరేనండి", "ఖచ్చితంగా", "అలాగే"'}) so streaming audio begins in under 50ms without dead air.`,
+    `- EXTREME BREVITY: Keep all answers strictly to 1 short sentence (max 10-15 words). Short turns ensure instantaneous transmission and effortless turn-taking.`,
     `- Output only plain spoken words. Never output markdown formatting (no asterisks, bold, bullet points, headers, or emojis).`,
     `- Ask strictly ONE question at a time to keep natural phone conversational pacing.`,
-    `- Immediate barge-in: If the caller interrupts or speaks, stop speaking and acknowledge their new point immediately.`,
+    `- Immediate barge-in: If the caller interrupts or speaks, stop speaking immediately and address their new point.`,
     isEnglish
-      ? `- Speak natural, warm Indian English with professional phone etiquette.`
+      ? `- Speak natural, warm Indian English with professional phone etiquette at a brisk 1.25x pace.`
       : isPureTelugu
-      ? `- Speak polite, natural everyday Telugu (e.g., "అవునండి", "సరేనండి", "ఖచ్చితంగా అండి").`
-      : `- Speak natural conversational Telugu and Tenglish (Telugu + English mix) as spoken in Andhra Pradesh and Telangana.`,
+      ? `- Speak polite, natural everyday Telugu (e.g., "అవునండి", "సరేనండి", "ఖచ్చితంగా అండి") at a brisk 1.25x pace.`
+      : `- Speak natural conversational Telugu and Tenglish (Telugu + English mix) as spoken in Andhra Pradesh and Telangana at a brisk 1.25x pace.`,
   ].join("\n");
 
   let dynamicContextBlock = "";
@@ -325,7 +327,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   } else {
     finalSystemPrompt = compileAgentInstructions({
       agentName,
-      instructions: "Assist the caller helpfully, politely, and concisely.",
+      instructions: "Assist the caller helpfully, politely, and concisely at a brisk 1.25x pace.",
       businessName: dbAgent.business?.name || "QETADOTIN",
       businessDescription: dbAgent.business?.description || bizContextParam,
       businessInformation: dbAgent.business?.information,
@@ -347,6 +349,11 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     });
   }
 
+  // Enforce 0.25x speed increase tag on initial greeting for instant brisk delivery
+  const finalGreeting = interpolatedGreeting.startsWith("<speed")
+    ? interpolatedGreeting
+    : `<speed ratio="1.25"/> ${interpolatedGreeting}`;
+
   if (keyToUse) {
     try {
       // 1. Prime Cartesia edge agent with exact instructions, prompt, greeting, voice, and language
@@ -361,7 +368,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
           },
           body: JSON.stringify({
             llm_system_prompt: finalSystemPrompt,
-            llm_introduce: interpolatedGreeting,
+            llm_introduce: finalGreeting,
             tts_voice: effectiveVoiceId,
             tts_language: ttsLanguage,
           }),
@@ -375,7 +382,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
       }
 
       if (patchRes.ok) {
-        console.log(`[OUTBOUND_DIALER] Successfully synced prompt to Cartesia agent ${targetCartesiaAgentId}! Greeting: "${interpolatedGreeting.slice(0, 60)}..."`);
+        console.log(`[OUTBOUND_DIALER] Successfully synced prompt to Cartesia agent ${targetCartesiaAgentId}! Greeting: "${finalGreeting.slice(0, 60)}..."`);
       } else {
         const patchErr = await patchRes.text().catch(() => "");
         console.warn(`[OUTBOUND_DIALER] Cartesia agent PATCH returned ${patchRes.status}: ${patchErr.slice(0, 200)}`);

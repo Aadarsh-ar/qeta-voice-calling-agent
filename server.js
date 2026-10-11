@@ -136,6 +136,9 @@ async function synthesizeSpeech(text, voiceId) {
           model_id: "sonic-3.6",
           transcript: text,
           voice: { mode: "id", id: voiceId },
+          generation_config: {
+            speed: 1.25,
+          },
           output_format: {
             container: "raw",
             encoding: "pcm_mulaw",
@@ -358,7 +361,7 @@ async function getLLMResponse(systemPrompt, history, userText) {
           model,
           messages,
           temperature: 0.2,
-          max_tokens: 75,
+          max_tokens: 45,
         }),
       },
       { timeoutMs: 14000, maxRetries: 2, retryOn5xx: true }
@@ -820,6 +823,9 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
             config: {
               input_format: "mulaw_8000",
               output_audio_delivery: "speaking_pace",
+              generation_config: {
+                speed: 1.25,
+              },
             },
           })
         );
