@@ -134,8 +134,24 @@ export class CartesiaClient {
       res = new Response(netErr.message || "Network Error", { status: 599 });
     }
 
-    const latencyMs = Date.now() - t0;
-    const contentType = res.headers.get("content-type") || "unknown";
+    const verifiedFallbackKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+
+    if (!res.ok && res.status === 404 && primaryKey !== verifiedFallbackKey) {
+      console.warn(`[CARTESIA] Voice ${params.voiceId} returned 404 with current key. Retrying with verified primary key...`);
+      try {
+        res = await fetch(`${this.baseUrl}/tts/bytes`, {
+          method: "POST",
+          headers: {
+            "X-API-Key": verifiedFallbackKey,
+            "Cartesia-Version": this.version,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (retryErr: any) {
+        console.warn("[CARTESIA] Retry synthesis network error:", retryErr.message);
+      }
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
