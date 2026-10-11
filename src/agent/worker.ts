@@ -24,9 +24,9 @@ initializeLogger({ level: "info", pretty: true });
 let loadedVad: any = null;
 async function getVad() {
   if (!loadedVad) {
-    // Ultra-Low Latency Optimization: Reduce minimum silence from 0.5s down to 0.18s (instant turn-taking)
+    // Ultra-Low Latency Optimization: Set minimum silence to 250ms (required minimum by TurnDetector)
     loadedVad = await silero.VAD.load({
-      minSilenceDuration: 0.18,
+      minSilenceDuration: 250,
     });
   }
   return loadedVad;
