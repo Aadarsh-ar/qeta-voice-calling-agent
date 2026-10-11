@@ -245,13 +245,16 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   }
   const fromNumberId = "ap_qXvGsN8xnFH3giNBsQ8QBM"; // +918071582667 connected to Vobiz SIP Trunk ata_bfSkbLZ3BgAX8QsWp7vWqY
 
-  if (cartesiaApiKey) {
+  const verifiedKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+  let keyToUse = (cartesiaApiKey && cartesiaApiKey.startsWith("sk_car_")) ? cartesiaApiKey : verifiedKey;
+
+  if (keyToUse) {
     try {
       console.log(`[OUTBOUND_DIALER] Primary Dispatch: Calling ${cleanNumber} via Cartesia Agent ${targetCartesiaAgentId} (${agentName})...`);
-      const cartesiaRes = await fetch("https://api.cartesia.ai/agents/calls", {
+      let cartesiaRes = await fetch("https://api.cartesia.ai/agents/calls", {
         method: "POST",
         headers: {
-          "X-API-Key": cartesiaApiKey,
+          "X-API-Key": keyToUse,
           "Cartesia-Version": "2025-04-16",
           "Content-Type": "application/json",
         },
@@ -262,6 +265,26 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
           outbound_calls: [{ to_number: cleanNumber }],
         }),
       });
+
+      // If initial key returns error and is not verifiedKey, retry with verified active key
+      if (!cartesiaRes.ok && keyToUse !== verifiedKey) {
+        console.warn(`[OUTBOUND_DIALER] Cartesia API failed with status ${cartesiaRes.status}. Retrying with verified active key...`);
+        keyToUse = verifiedKey;
+        cartesiaRes = await fetch("https://api.cartesia.ai/agents/calls", {
+          method: "POST",
+          headers: {
+            "X-API-Key": verifiedKey,
+            "Cartesia-Version": "2025-04-16",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from_number_id: fromNumberId,
+            agent_id: targetCartesiaAgentId,
+            ringing_timeout_seconds: 30,
+            outbound_calls: [{ to_number: cleanNumber }],
+          }),
+        });
+      }
 
       if (cartesiaRes.ok) {
         const cData = await cartesiaRes.json();

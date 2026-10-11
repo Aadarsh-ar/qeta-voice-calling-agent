@@ -53,11 +53,11 @@ export async function POST(req: Request) {
         vobizCallId: dialerResult.vobizCallId,
         reason: dialerResult.telephonyReason,
         publicUrl: webhookUrl,
-        carrier: "LiveKit Cloud SIP (Vobiz Trunk)",
+        carrier: dialerResult.cartesiaDispatched ? "Cartesia Realtime Voice (Vobiz Trunk)" : "LiveKit Cloud SIP (Vobiz Trunk)",
         trunkId: telConfig.vobizTrunkId,
         domain: telConfig.vobizSipDomain,
       },
-      message: `Placing outbound call to ${to} via LiveKit SIP. Agent will greet when call connects.`,
+      message: `Placing outbound call to ${to} via ${dialerResult.cartesiaDispatched ? "Cartesia Realtime Voice" : "LiveKit SIP"}. Agent will greet when call connects.`,
     });
   } catch (err: unknown) {
     console.error("[CALLS_OUTBOUND_ERROR]", err);
