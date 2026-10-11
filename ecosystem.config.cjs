@@ -17,13 +17,10 @@ module.exports = {
     },
     {
       name: "qeta-voice-agent",
-      script: "npx",
-      args: "tsx src/agent/worker.ts start",
+      script: "./node_modules/tsx/dist/cli.mjs",
+      args: "src/agent/worker.ts start",
       instances: 1,
       autorestart: true,
-      exp_backoff_restart_delay: 200,
-      max_restarts: 50,
-      min_uptime: "10s",
       watch: false,
       max_memory_restart: "1G",
       env: {
