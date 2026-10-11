@@ -258,13 +258,14 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
       }
 
       // Create SIP participant to dial destination phone
-      console.log(`[LIVEKIT SIP] Dialing ${cleanNumber} via trunk ${livekitSipTrunkId} into room ${roomName}...`);
+      console.log(`[LIVEKIT SIP] Dialing ${cleanNumber} via trunk ${livekitSipTrunkId} from ${outboundCallerId} into room ${roomName}...`);
       const sipClient = new SipClient(livekitHost, livekitApiKey, livekitApiSecret);
       const sipParticipant = await sipClient.createSipParticipant(
         livekitSipTrunkId,
         cleanNumber,
         roomName,
         {
+          fromNumber: outboundCallerId,
           participantIdentity: `caller_${cleanNumber}`,
           participantMetadata: JSON.stringify({ agentId: resolvedAgentId, callId }),
           playRingtone: true,
@@ -302,8 +303,8 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
         body: JSON.stringify({
           from: outboundCallerId,
           to: cleanNumber,
-          answer_url: `${webhookBase}/api/vobiz/answer?callId=${encodeURIComponent(callId)}`,
-          hangup_url: `${webhookBase}/api/vobiz/hangup?callId=${encodeURIComponent(callId)}`,
+          answer_url: `${webhookBase}/api/vobiz/incoming-call?callId=${encodeURIComponent(callId)}&agentId=${encodeURIComponent(resolvedAgentId)}&callerNumber=${encodeURIComponent(cleanNumber)}`,
+          hangup_url: `${webhookBase}/api/vobiz/call-status?callId=${encodeURIComponent(callId)}`,
         }),
       });
 
