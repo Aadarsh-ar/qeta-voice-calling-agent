@@ -130,7 +130,6 @@ export default function AgentsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        dataStore.deleteAgent(target.id);
         showToast(`Agent "${target.name}" deleted.`);
       } else {
         const refresh = await fetch("/api/agents");

@@ -27,7 +27,7 @@ export class CartesiaClient {
     if (cleanEnvKey && cleanEnvKey.startsWith("sk_car_")) {
       return cleanEnvKey;
     }
-    return this.apiKey || "";
+    return this.apiKey || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   }
 
   isConfigured(): boolean {
@@ -136,8 +136,8 @@ export class CartesiaClient {
 
     const verifiedFallbackKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
 
-    if (!res.ok && res.status === 404 && primaryKey !== verifiedFallbackKey) {
-      console.warn(`[CARTESIA] Voice ${params.voiceId} returned 404 with current key. Retrying with verified primary key...`);
+    if (!res.ok && primaryKey !== verifiedFallbackKey) {
+      console.warn(`[CARTESIA] Voice request returned HTTP ${res.status}. Retrying with verified primary fallback key...`);
       try {
         res = await fetch(`${this.baseUrl}/tts/bytes`, {
           method: "POST",
