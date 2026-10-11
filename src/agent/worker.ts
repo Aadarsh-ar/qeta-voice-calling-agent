@@ -76,7 +76,7 @@ export default defineAgent({
     let agentData: any = null;
     let versionSnapshot: any = null;
 
-    if (!isDemo) {
+    if (!isDemo || agentId) {
       if (callId) {
         try {
           callRecord = await prisma.call.findUnique({
@@ -111,7 +111,7 @@ export default defineAgent({
 
       agentData = callRecord?.agent;
       if (!agentData) {
-        const targetAgentId = agentId || process.env.NEXT_PUBLIC_SHOWCASE_AGENT_ID || "agent_WzcEn6kkRmPxAfBNHzvpa1";
+        const targetAgentId = agentId || (!isDemo ? (process.env.NEXT_PUBLIC_SHOWCASE_AGENT_ID || "agent_WzcEn6kkRmPxAfBNHzvpa1") : null);
         if (targetAgentId) {
           try {
             agentData = await prisma.agent.findFirst({
@@ -132,7 +132,7 @@ export default defineAgent({
           }
         }
 
-        if (!agentData) {
+        if (!agentData && !isDemo) {
           try {
             agentData = await prisma.agent.findFirst({
               where: { status: "ACTIVE" },
@@ -147,12 +147,13 @@ export default defineAgent({
       }
     }
 
+    const hasConfiguredAgent = Boolean(agentData || versionSnapshot);
     const agentName = versionSnapshot?.name || agentData?.name || "Personal Assistant (Priya)";
     const businessName = agentData?.business?.name || "QETADOTIN Technologies";
     const language = (versionSnapshot?.language || agentData?.language || "TELUGU_ENGLISH") as any;
 
     // Strictly enforce voice id for landing page demo or use pinned/agent voice
-    const voiceId = isDemo
+    const voiceId = (!hasConfiguredAgent && isDemo)
       ? "41508a7d-4839-445f-ba7f-687f620ed0e7"
       : (versionSnapshot?.voiceId ||
          agentData?.voiceId ||
@@ -163,7 +164,7 @@ export default defineAgent({
     const knowledgeSnippets = agentData?.knowledge?.map((k: any) => `${k.title}: ${k.content}`) || [];
 
     // 2. Compile System Prompt & Greeting
-    const instructions = isDemo
+    const instructions = (!hasConfiguredAgent && isDemo)
       ? `# గుర్తింపు & పాత్ర
 నువ్వు ప్రియ (Priya), qetadotin యొక్క అధికారిక AI Voice Agent.
 qetadotin అనేది businesses కోసం AI Voice Agents తయారు చేసే platform. ఇవి customersతో phone conversations మాట్లాడటం, enquiries handle చేయటం, questionsకి సమాధానం ఇవ్వటం, leads qualify చేయటం, మరియు repetitive phone conversations automate చేయటంలో సహాయపడతాయి.
@@ -225,7 +226,7 @@ Visitor conversation ముగించాలనుకుంటే:
           knowledgeSnippets: (versionSnapshot?.knowledge as any[])?.map((k: any) => `${k.title}: ${k.content}`) || knowledgeSnippets,
         });
 
-    const greeting = isDemo
+    const greeting = (!hasConfiguredAgent && isDemo)
       ? "హాయ్! నేను ప్రియ, qetadotin యొక్క AI Voice Agent. నాతో ఏదైనా మాట్లాడండి — qetadotin ఎలా పనిచేస్తుందో మీరే experience చేయొచ్చు."
       : compileAgentGreeting({
           agentName,

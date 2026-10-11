@@ -13,6 +13,7 @@ import { getTelephonyConfig, resolveWebhookBaseUrl } from "@/lib/config/telephon
 import { isValidVoiceId, getVoiceName, DEFAULT_VOICE_ID } from "@/lib/config/voices";
 import { prisma } from "@/lib/db/prisma";
 import { getCurrentAgentVersion } from "@/lib/agent/versionService";
+import { compileAgentInstructions, compileAgentGreeting } from "@/lib/agent/promptCompiler";
 
 export interface OutboundCallParams {
   to: string;
@@ -87,31 +88,49 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   const telConfig = getTelephonyConfig();
   const outboundCallerId = telConfig.vobizPhoneNumber || "+918071582667";
 
-  // 1. Resolve agent from dataStore or DB
+  // 1. Resolve agent from DB (authoritative) or dataStore
   let dbAgent: any = null;
   const targetAgentId = params.agentId || telConfig.cartesiaAgentId;
 
   if (targetAgentId) {
-    const memAgent = dataStore.getAgent(targetAgentId);
-    if (memAgent) {
-      dbAgent = {
-        id: memAgent.id,
-        name: memAgent.name,
-        organizationId: "org_default",
-        voiceId: memAgent.cartesiaVoiceId,
-        cartesiaVoiceId: memAgent.cartesiaVoiceId,
-        cartesiaAgentId: memAgent.cartesiaAgentId,
-      };
-    } else {
-      try {
-        dbAgent = await prisma.agent.findFirst({
-          where: {
-            OR: [{ id: targetAgentId }, { cartesiaAgentId: targetAgentId }],
-          },
-          include: { business: true, tools: true },
-        });
-      } catch (dbErr) {
-        console.warn("[OUTBOUND_DIALER] DB lookup warning:", dbErr);
+    try {
+      dbAgent = await prisma.agent.findFirst({
+        where: {
+          OR: [{ id: targetAgentId }, { cartesiaAgentId: targetAgentId }],
+        },
+        include: { business: true, tools: true, knowledge: true },
+      });
+    } catch (dbErr) {
+      console.warn("[OUTBOUND_DIALER] DB lookup warning:", dbErr);
+    }
+
+    if (!dbAgent) {
+      const memAgent = dataStore.getAgent(targetAgentId);
+      if (memAgent) {
+        dbAgent = {
+          id: memAgent.id,
+          name: memAgent.name,
+          organizationId: "org_default",
+          voiceId: memAgent.cartesiaVoiceId,
+          cartesiaVoiceId: memAgent.cartesiaVoiceId,
+          cartesiaAgentId: memAgent.cartesiaAgentId,
+          instructions: memAgent.instructions || memAgent.systemPrompt,
+          systemPrompt: memAgent.systemPrompt || memAgent.instructions,
+          initialMessage: memAgent.initialMessage,
+          language: memAgent.language,
+          businessContext: memAgent.businessContext,
+          business: memAgent.businessProfile ? {
+            name: memAgent.businessProfile.businessName,
+            description: memAgent.businessProfile.description,
+            information: memAgent.businessProfile.productsServices,
+            operatingHours: memAgent.businessProfile.workingHours,
+            address: memAgent.businessProfile.location,
+            contactInformation: memAgent.businessProfile.contactInfo,
+            website: "",
+          } : undefined,
+          knowledge: memAgent.businessProfile?.faqs?.map(f => ({ title: f.question, content: f.answer })),
+          tools: memAgent.tools,
+        };
       }
     }
   }
@@ -121,7 +140,7 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     try {
       dbAgent = await prisma.agent.findFirst({
         where: { status: "ACTIVE" },
-        include: { business: true, tools: true },
+        include: { business: true, tools: true, knowledge: true },
         orderBy: { createdAt: "desc" },
       });
     } catch {}
@@ -248,8 +267,121 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   const verifiedKey = "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
   let keyToUse = (cartesiaApiKey && cartesiaApiKey.startsWith("sk_car_")) ? cartesiaApiKey : verifiedKey;
 
+  // Substitute dynamic lead variables into text (e.g. {{student_name}}, {{customerName}}, {balance})
+  function interpolateVars(text: string, vars?: Record<string, string>): string {
+    if (!text || !vars) return text || "";
+    let result = text;
+    for (const [key, val] of Object.entries(vars)) {
+      if (val !== undefined && val !== null) {
+        const regDouble = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi");
+        const regSingle = new RegExp(`\\{\\s*${key}\\s*\\}`, "gi");
+        result = result.replace(regDouble, String(val)).replace(regSingle, String(val));
+      }
+    }
+    return result;
+  }
+
+  // Compile prompt & greeting faithfully from dbAgent, dynamic variables, and business context
+  const dynamicVars = params.dynamicVariables || {};
+  const rawInstructions = (dbAgent.instructions || dbAgent.systemPrompt || "").trim();
+  const rawGreeting = (dbAgent.initialMessage || "").trim();
+  const bizContextParam = (params.businessContext || "").trim();
+
+  // Interpolate dynamic variables
+  const interpolatedInstructions = interpolateVars(rawInstructions, dynamicVars);
+  let interpolatedGreeting = interpolateVars(rawGreeting, dynamicVars).trim();
+
+  const isEnglish = dbAgent.language === "ENGLISH";
+  const isPureTelugu = dbAgent.language === "TELUGU";
+  const ttsLanguage = isEnglish ? "en" : "te";
+
+  // Conversational voice behavior directives ensuring low-latency turns, 1-2 sentence replies, and clean spoken audio
+  const spokenVoiceRules = [
+    `[CRITICAL SPOKEN VOICE GUIDELINES]`,
+    `- You are speaking on a live phone call. Keep every response strictly to 1 or 2 natural spoken sentences (under 25 words). Never monologue.`,
+    `- Output only plain spoken words. Never output markdown formatting (no asterisks, bold, bullet points, headers, or emojis).`,
+    `- Ask strictly ONE question at a time to keep natural phone conversational pacing.`,
+    `- Immediate barge-in: If the caller interrupts or speaks, stop speaking and acknowledge their new point immediately.`,
+    isEnglish
+      ? `- Speak natural, warm Indian English with professional phone etiquette.`
+      : isPureTelugu
+      ? `- Speak polite, natural everyday Telugu (e.g., "అవునండి", "సరేనండి", "ఖచ్చితంగా అండి").`
+      : `- Speak natural conversational Telugu and Tenglish (Telugu + English mix) as spoken in Andhra Pradesh and Telangana.`,
+  ].join("\n");
+
+  let dynamicContextBlock = "";
+  if (Object.keys(dynamicVars).length > 0) {
+    const lines = Object.entries(dynamicVars).map(([k, v]) => `- ${k}: ${v}`).join("\n");
+    dynamicContextBlock = `\n\n[CALL DETAILS & LEAD INFORMATION]\n- Recipient Number: ${cleanNumber}\n${lines}`;
+  }
+
+  let finalSystemPrompt = "";
+  if (interpolatedInstructions) {
+    let bizBlock = "";
+    if (bizContextParam && !interpolatedInstructions.includes(bizContextParam)) {
+      bizBlock = `\n\n[BUSINESS CONTEXT]\n${bizContextParam}`;
+    }
+    finalSystemPrompt = `${spokenVoiceRules}\n\n[PRIMARY AGENT INSTRUCTIONS (GROUND TRUTH)]\n${interpolatedInstructions}${dynamicContextBlock}${bizBlock}`;
+  } else {
+    finalSystemPrompt = compileAgentInstructions({
+      agentName,
+      instructions: "Assist the caller helpfully, politely, and concisely.",
+      businessName: dbAgent.business?.name || "QETADOTIN",
+      businessDescription: dbAgent.business?.description || bizContextParam,
+      businessInformation: dbAgent.business?.information,
+      operatingHours: dbAgent.business?.operatingHours,
+      address: dbAgent.business?.address,
+      contactInformation: dbAgent.business?.contactInformation,
+      website: dbAgent.business?.website,
+      faqs: (dbAgent.knowledge || []).map((k: any) => ({ question: k.title, answer: k.content })),
+      tools: dbAgent.tools || [],
+      language: dbAgent.language,
+    }) + (dynamicContextBlock ? `\n\n${dynamicContextBlock}` : "");
+  }
+
+  if (!interpolatedGreeting) {
+    interpolatedGreeting = compileAgentGreeting({
+      agentName,
+      businessName: dbAgent.business?.name || "QETADOTIN",
+      language: dbAgent.language,
+    });
+  }
+
   if (keyToUse) {
     try {
+      // 1. Prime Cartesia edge agent with exact instructions, prompt, greeting, voice, and language
+      console.log(`[OUTBOUND_DIALER] Syncing prompt & greeting to Cartesia Agent ${targetCartesiaAgentId} (${agentName})...`);
+      const syncCartesia = async (apiKey: string) => {
+        return fetch(`https://api.cartesia.ai/agents/${targetCartesiaAgentId}`, {
+          method: "PATCH",
+          headers: {
+            "X-API-Key": apiKey,
+            "Cartesia-Version": "2025-04-16",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            llm_system_prompt: finalSystemPrompt,
+            llm_introduce: interpolatedGreeting,
+            tts_voice: effectiveVoiceId,
+            tts_language: ttsLanguage,
+          }),
+        });
+      };
+
+      let patchRes = await syncCartesia(keyToUse);
+      if (!patchRes.ok && keyToUse !== verifiedKey) {
+        keyToUse = verifiedKey;
+        patchRes = await syncCartesia(keyToUse);
+      }
+
+      if (patchRes.ok) {
+        console.log(`[OUTBOUND_DIALER] Successfully synced prompt to Cartesia agent ${targetCartesiaAgentId}! Greeting: "${interpolatedGreeting.slice(0, 60)}..."`);
+      } else {
+        const patchErr = await patchRes.text().catch(() => "");
+        console.warn(`[OUTBOUND_DIALER] Cartesia agent PATCH returned ${patchRes.status}: ${patchErr.slice(0, 200)}`);
+      }
+
+      // 2. Dispatch outbound call via Cartesia Realtime Agent Calling
       console.log(`[OUTBOUND_DIALER] Primary Dispatch: Calling ${cleanNumber} via Cartesia Agent ${targetCartesiaAgentId} (${agentName})...`);
       let cartesiaRes = await fetch("https://api.cartesia.ai/agents/calls", {
         method: "POST",

@@ -337,6 +337,33 @@ export async function PUT(
       }).catch(() => {});
     } catch {}
 
+    // Prime Cartesia edge agent with newly saved prompt & greeting
+    const targetCartesiaAgentId = updatedDbAgent.cartesiaAgentId || "agent_64am1Eu4uBXX57WACaGrin";
+    if (targetCartesiaAgentId && targetCartesiaAgentId.startsWith("agent_")) {
+      const cartesiaApiKey = process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+      const ttsLanguage = language === "ENGLISH" ? "en" : "te";
+      try {
+        fetch(`https://api.cartesia.ai/agents/${targetCartesiaAgentId}`, {
+          method: "PATCH",
+          headers: {
+            "X-API-Key": cartesiaApiKey,
+            "Cartesia-Version": "2025-04-16",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            llm_system_prompt: compiledInstructions,
+            llm_introduce: compiledGreeting,
+            tts_voice: voiceId,
+            tts_language: ttsLanguage,
+          }),
+        }).then(async (r) => {
+          if (r.ok) {
+            console.log(`[AGENTS_PUT] Successfully synced prompt to Cartesia agent ${targetCartesiaAgentId}`);
+          }
+        }).catch((e) => console.warn(`[AGENTS_PUT] Cartesia sync background warning:`, e?.message || e));
+      } catch {}
+    }
+
     return NextResponse.json({
       success: true,
       agent: updated,

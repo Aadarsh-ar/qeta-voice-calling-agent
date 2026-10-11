@@ -98,17 +98,60 @@ export async function POST(
       version = await createAgentVersion(dbAgent.id);
     } catch {}
 
+    const targetCartesiaAgentId = dbAgent.cartesiaAgentId || "agent_64am1Eu4uBXX57WACaGrin";
+    const cartesiaApiKey = process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+    const voiceId = dbAgent.voiceId || dbAgent.cartesiaVoiceId || "41508a7d-4839-445f-ba7f-687f620ed0e7";
+    const ttsLanguage = dbAgent.language === "ENGLISH" ? "en" : "te";
+    const instructions = dbAgent.instructions || dbAgent.systemPrompt || "";
+    const greeting = dbAgent.initialMessage || "";
+
+    let syncOk = false;
+    let syncError: string | null = null;
+    try {
+      const syncRes = await fetch(`https://api.cartesia.ai/agents/${targetCartesiaAgentId}`, {
+        method: "PATCH",
+        headers: {
+          "X-API-Key": cartesiaApiKey,
+          "Cartesia-Version": "2025-04-16",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          llm_system_prompt: instructions,
+          llm_introduce: greeting,
+          tts_voice: voiceId,
+          tts_language: ttsLanguage,
+        }),
+      });
+      syncOk = syncRes.ok;
+      if (!syncOk) {
+        syncError = await syncRes.text().catch(() => "Cartesia API sync error");
+      }
+    } catch (e: any) {
+      syncError = e?.message || "Sync exception";
+    }
+
+    await prisma.agent.update({
+      where: { id: dbAgent.id },
+      data: {
+        lastSyncedAt: new Date(),
+        lastSyncStatus: syncOk ? "SYNCED" : "SYNC_FAILED",
+        lastSyncError: syncError,
+      },
+    }).catch(() => {});
+
     return NextResponse.json({
-      success: true,
-      isSynced: true,
+      success: syncOk,
+      isSynced: syncOk,
       hasDrift: false,
-      message: "Agent is synchronized in PostgreSQL database.",
+      message: syncOk
+        ? "Agent instructions and greeting successfully synchronized to Cartesia edge runtime."
+        : `Cartesia sync status: ${syncError || "failed"}`,
       agent: {
         id: dbAgent.id,
         name: dbAgent.name,
-        instructions: dbAgent.instructions || dbAgent.systemPrompt,
-        initialMessage: dbAgent.initialMessage,
-        cartesiaVoiceId: dbAgent.voiceId || dbAgent.cartesiaVoiceId,
+        instructions,
+        initialMessage: greeting,
+        cartesiaVoiceId: voiceId,
         language: dbAgent.language,
       },
       version: version?.versionNumber || dbAgent.currentVersionNum,
