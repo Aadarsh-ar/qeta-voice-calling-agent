@@ -16,8 +16,8 @@ export const DEFAULT_TELEPHONY_CONFIG = {
   vobizSipDomain: process.env.VOBIZ_SIP_DOMAIN || "f15a55c4.sip.vobiz.ai",
   vobizSipUsername: process.env.VOBIZ_SIP_USERNAME || "",
   vobizSipPassword: process.env.VOBIZ_SIP_PASSWORD || "",
-  cartesiaApiKey: process.env.CARTESIA_API_KEY || "",
-  cartesiaAgentId: process.env.CARTESIA_AGENT_ID || "",
+  cartesiaApiKey: process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U",
+  cartesiaAgentId: process.env.CARTESIA_AGENT_ID || "agent_64am1Eu4uBXX57WACaGrin",
   cartesiaVoiceId: process.env.CARTESIA_VOICE_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7",
   cartesiaVoiceHarikaId: process.env.CARTESIA_VOICE_HARIKA_ID || "41508a7d-4839-445f-ba7f-687f620ed0e7",
   sarvamApiKey: process.env.SARVAM_API_KEY || "",
@@ -81,8 +81,14 @@ export function getTelephonyConfig() {
   }
 
   let cartesiaAgentId = getEnvVar("CARTESIA_AGENT_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId);
-  if (cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" || !cartesiaAgentId.startsWith("agent_")) {
-    cartesiaAgentId = DEFAULT_TELEPHONY_CONFIG.cartesiaAgentId;
+  if (
+    !cartesiaAgentId ||
+    !cartesiaAgentId.startsWith("agent_") ||
+    cartesiaAgentId === "agent_GaiYMgB9Bj9kaKW1tUgqSQ" ||
+    cartesiaAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx" ||
+    cartesiaAgentId === "agent_tEuFVc7x2cFNcSDSyAvRWm"
+  ) {
+    cartesiaAgentId = "agent_64am1Eu4uBXX57WACaGrin";
   }
 
   const cartesiaVoiceId = getEnvVar("CARTESIA_VOICE_ID", DEFAULT_TELEPHONY_CONFIG.cartesiaVoiceId);

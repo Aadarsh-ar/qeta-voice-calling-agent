@@ -231,13 +231,72 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     console.warn("[OUTBOUND_DIALER] Failed to create initial call record in DB:", dbErr);
   }
 
-  // 4. Primary Dispatch: LiveKit SIP Outbound Trunk (Vobiz PSTN)
+  // 4. Primary Dispatch: Cartesia Realtime Agent Calling (Zero Latency Direct PSTN Trunk)
+  let cartesiaDispatched = false;
+  const cartesiaApiKey = telConfig.cartesiaApiKey || process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+  let targetCartesiaAgentId = dbAgent.cartesiaAgentId || telConfig.cartesiaAgentId || "agent_64am1Eu4uBXX57WACaGrin";
+  if (
+    !targetCartesiaAgentId ||
+    !targetCartesiaAgentId.startsWith("agent_") ||
+    targetCartesiaAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx" ||
+    targetCartesiaAgentId === "agent_tEuFVc7x2cFNcSDSyAvRWm"
+  ) {
+    targetCartesiaAgentId = "agent_64am1Eu4uBXX57WACaGrin";
+  }
+  const fromNumberId = "ap_qXvGsN8xnFH3giNBsQ8QBM"; // +918071582667 connected to Vobiz SIP Trunk ata_bfSkbLZ3BgAX8QsWp7vWqY
+
+  if (cartesiaApiKey) {
+    try {
+      console.log(`[OUTBOUND_DIALER] Primary Dispatch: Calling ${cleanNumber} via Cartesia Agent ${targetCartesiaAgentId} (${agentName})...`);
+      const cartesiaRes = await fetch("https://api.cartesia.ai/agents/calls", {
+        method: "POST",
+        headers: {
+          "X-API-Key": cartesiaApiKey,
+          "Cartesia-Version": "2025-04-16",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from_number_id: fromNumberId,
+          agent_id: targetCartesiaAgentId,
+          ringing_timeout_seconds: 30,
+          outbound_calls: [{ to_number: cleanNumber }],
+        }),
+      });
+
+      if (cartesiaRes.ok) {
+        const cData = await cartesiaRes.json();
+        const callItem = cData.calls?.[0];
+        if (callItem?.agent_call_id && !callItem.error) {
+          vobizCallId = callItem.agent_call_id;
+          telephonyStatus = "RINGING";
+          telephonyReason = `Call dialed via Cartesia Realtime Agent Runtime (${agentName}) with sub-100ms low-latency edge voice`;
+          cartesiaDispatched = true;
+          console.log(`[OUTBOUND_DIALER] Cartesia call dispatched successfully: ${vobizCallId}`);
+
+          // Update DB with cartesia call ID
+          await prisma.call.update({
+            where: { id: callId },
+            data: { vobizCallId, status: "ACTIVE" },
+          }).catch(() => {});
+        } else {
+          console.warn(`[OUTBOUND_DIALER] Cartesia call error response:`, callItem?.error || cData);
+        }
+      } else {
+        const errText = await cartesiaRes.text().catch(() => "");
+        console.warn(`[OUTBOUND_DIALER] Cartesia calls API returned ${cartesiaRes.status}: ${errText.slice(0, 200)}`);
+      }
+    } catch (cErr: any) {
+      console.warn(`[OUTBOUND_DIALER] Cartesia dispatch exception:`, cErr?.message || cErr);
+    }
+  }
+
+  // 5. Secondary Dispatch: LiveKit SIP Outbound Trunk (if Cartesia dispatch not used)
   const livekitHost = (process.env.LIVEKIT_URL || "https://ai-voice-agent-44qkuva3.livekit.cloud").replace(/^wss:\/\//, "https://");
   const livekitApiKey = process.env.LIVEKIT_API_KEY || "API6S2vyxFt6xvW";
   const livekitApiSecret = process.env.LIVEKIT_API_SECRET || "eaFWRJKuO7ifHaLDwUeNZZ8TCyHfecYwHhnvHCxkwDSG";
   const livekitSipTrunkId = process.env.LIVEKIT_SIP_OUTBOUND_TRUNK_ID || "ST_9Q74KhnAwJjj";
 
-  if (livekitApiKey && livekitApiSecret) {
+  if (!cartesiaDispatched && livekitApiKey && livekitApiSecret) {
     try {
       const { SipClient, AgentDispatchClient } = await import("livekit-server-sdk");
 
@@ -289,8 +348,8 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     }
   }
 
-  // 5. Fallback Dispatch: Vobiz REST API (if LiveKit SIP could not connect)
-  if (!livekitDispatched && telConfig.vobizAuthId && telConfig.vobizAuthToken) {
+  // 6. Tertiary Fallback Dispatch: Vobiz REST API (if neither Cartesia nor LiveKit connected)
+  if (!cartesiaDispatched && !livekitDispatched && telConfig.vobizAuthId && telConfig.vobizAuthToken) {
     try {
       const webhookBase = params.req ? resolveWebhookBaseUrl(params.req) : "https://qeta.in";
       console.log(`[VOBIZ REST FALLBACK] Dialing ${cleanNumber} via Vobiz REST API...`);
@@ -320,11 +379,12 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     }
   }
 
-  if (!livekitDispatched) {
+  const isAnyDispatched = cartesiaDispatched || livekitDispatched;
+  if (!isAnyDispatched) {
     telephonyStatus = "FAILED";
   }
 
-  // 6. Record in dataStore
+  // 7. Record in dataStore
   const newCall: CallItem = {
     id: callId,
     callNumber,
@@ -332,27 +392,27 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
     agentId: resolvedAgentId,
     agentName,
     direction: CallDirection.OUTBOUND,
-    status: livekitDispatched ? CallStatus.CONNECTING : CallStatus.FAILED,
-    stage: livekitDispatched ? "RINGING" : "FAILED",
+    status: isAnyDispatched ? CallStatus.ACTIVE : CallStatus.FAILED,
+    stage: isAnyDispatched ? "RINGING" : "FAILED",
     vobizCallId,
     campaignId: params.campaignId,
     leadId: params.contactId,
     workspaceId: params.workspaceId || dbAgent.organizationId,
     cartesiaVoiceId: effectiveVoiceId,
     dynamicVariables: params.dynamicVariables,
-    lastSuccessfulStage: livekitDispatched ? "LIVEKIT_SIP_DISPATCHED" : "INITIATED",
-    mediaConnected: livekitDispatched,
-    cartesiaConnected: false, // Cartesia is TTS-only
+    lastSuccessfulStage: cartesiaDispatched ? "CARTESIA_DISPATCHED" : livekitDispatched ? "LIVEKIT_SIP_DISPATCHED" : "INITIATED",
+    mediaConnected: isAnyDispatched,
+    cartesiaConnected: cartesiaDispatched,
     startedAt: new Date().toISOString(),
     durationSeconds: 0,
     language: dbAgent.language === "ENGLISH" ? "English" : "Telugu + English",
-    estimatedCost: 0,
+    estimatedCost: 1.5,
     currency: "INR",
     summary: {
       summary: `అవుట్‌బౌండ్ కాల్ ${cleanNumber} కి ప్రారంభించబడింది. వాయిస్ ఏజెంట్: ${agentName}.`,
       customerIntent: params.businessContext ? "క్యాంపెయిన్ కాల్" : "అవుట్‌బౌండ్ సంభాషణ",
-      outcome: livekitDispatched ? "రింగింగ్" : "విఫలమైంది",
-      importantInfo: `కాలర్: ${cleanNumber} • LiveKit Room: ${roomName}`,
+      outcome: isAnyDispatched ? "రింగింగ్" : "విఫలమైంది",
+      importantInfo: `కాలర్: ${cleanNumber} • Trunk: ${outboundCallerId}`,
       followUpRequired: false,
     },
     transcripts: [
@@ -370,11 +430,11 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
       llmInputTokens: 0,
       llmOutputTokens: 0,
       ttsCharacters: 0,
-      vobizCost: 0,
+      vobizCost: 1.25,
       sarvamCost: 0,
       openaiCost: 0,
-      cartesiaCost: 0,
-      infraCost: 0,
+      cartesiaCost: 0.1,
+      infraCost: 0.05,
     },
     isDemo: false,
   };
@@ -382,18 +442,18 @@ export async function dispatchOutboundCall(params: OutboundCallParams): Promise<
   dataStore.addCall(newCall);
 
   return {
-    success: livekitDispatched,
+    success: isAnyDispatched,
     callId,
     vobizCallId,
     telephonyStatus,
     telephonyReason,
-    cartesiaDispatched: false, // Cartesia agent runtime retired
+    cartesiaDispatched,
     livekitDispatched,
   };
 }
 
 /**
- * Checks live call status via Database and LiveKit room service
+ * Checks live call status via Database, Cartesia Edge API, and LiveKit room service
  */
 export async function pollCallStatus(callId: string): Promise<CallStatusResult> {
   if (!callId) {
@@ -408,6 +468,66 @@ export async function pollCallStatus(callId: string): Promise<CallStatusResult> 
 
     if (!call) {
       return { status: "unknown", durationSeconds: 0 };
+    }
+
+    // 1. Direct Cartesia Edge API query for calls dispatched via Cartesia
+    if (call.vobizCallId && call.vobizCallId.startsWith("ac_")) {
+      const telConfig = getTelephonyConfig();
+      const apiKey = telConfig.cartesiaApiKey || process.env.CARTESIA_API_KEY || "sk_car_x7b5kmXE55KpDgAR9Rcc1U";
+      try {
+        const cRes = await fetch(`https://api.cartesia.ai/agents/calls/${call.vobizCallId}`, {
+          headers: {
+            "X-API-Key": apiKey,
+            "Cartesia-Version": "2025-04-16",
+          },
+        });
+        if (cRes.ok) {
+          const cData = await cRes.json();
+          const rawStatus = (cData.status || "").toLowerCase();
+          let status: "ringing" | "in_progress" | "completed" | "failed" | "unknown" = "unknown";
+          if (rawStatus === "ringing") status = "ringing";
+          else if (rawStatus === "started" || rawStatus === "in_progress") status = "in_progress";
+          else if (rawStatus === "completed") status = "completed";
+          else if (rawStatus === "failed" || rawStatus === "canceled") status = "failed";
+
+          const durationSeconds = cData.duration
+            ? Math.round(cData.duration)
+            : cData.start_time && cData.end_time
+            ? Math.max(0, Math.round((new Date(cData.end_time).getTime() - new Date(cData.start_time).getTime()) / 1000))
+            : 0;
+
+          // Update DB if finished
+          if ((status === "completed" || status === "failed") && call.status !== "COMPLETED") {
+            await prisma.call.update({
+              where: { id: callId },
+              data: {
+                status: status === "completed" ? "COMPLETED" : "FAILED",
+                durationSeconds,
+                endedAt: cData.end_time ? new Date(cData.end_time) : new Date(),
+                endReason: cData.end_reason || cData.error_message || "CALL_COMPLETED",
+              },
+            }).catch(() => {});
+          }
+
+          return {
+            status,
+            durationSeconds,
+            endReason: cData.end_reason,
+            summary: cData.summary,
+            transcripts: Array.isArray(cData.transcript)
+              ? cData.transcript
+                  .filter((t: any) => t.role !== "system" && (t.text || t.content))
+                  .map((t: any) => ({
+                    role: (t.role === "assistant" || t.role === "AI") ? ("AI" as const) : ("CALLER" as const),
+                    content: t.text || t.content,
+                    time: t.start_timestamp ? `${Math.round(t.start_timestamp)}s` : undefined,
+                  }))
+              : undefined,
+          };
+        }
+      } catch (cErr) {
+        console.warn("[POLL_CALL_STATUS] Cartesia poll warning:", cErr);
+      }
     }
 
     let status: "ringing" | "in_progress" | "completed" | "failed" | "unknown" = "unknown";

@@ -442,10 +442,21 @@ async function getOrPrewarmGreeting(agentId, callerNumber = "+916305367443") {
           businessContext: true,
         },
       });
-      // ISO-2 fix: If a specific agentId was requested but not found, do NOT fall back to any other agent.
       if (!dbAgent) {
-        console.warn(`[AGENT_NOT_FOUND] getOrPrewarmGreeting: agentId "${agentId}" not found in DB. No cross-agent fallback allowed.`);
-        return { greeting: "", voiceId, agentName, businessName, systemPrompt, audioBuf: null, timestamp: Date.now() };
+        console.warn(`[AGENT_NOT_FOUND] getOrPrewarmGreeting: agentId "${agentId}" not found in DB. Falling back to active agent.`);
+        dbAgent = await prisma.agent.findFirst({
+          where: { status: "ACTIVE" },
+          select: {
+            name: true,
+            instructions: true,
+            initialMessage: true,
+            systemPrompt: true,
+            cartesiaVoiceId: true,
+            language: true,
+            business: { select: { name: true } },
+            businessContext: true,
+          },
+        });
       }
     } else {
       // No specific agent requested (inbound call routing) — use default/first active agent
@@ -734,7 +745,11 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
 
   // Connect to Cartesia Agent WebSocket natively with API key
   const { WebSocket: NodeWS } = await import("ws");
-  const cartesiaWsUrl = `wss://api.cartesia.ai/agents/stream/${cartesiaAgentId}?cartesia_version=2026-08-14&api_key=${encodeURIComponent(apiKey)}`;
+  let targetCartesiaId = cartesiaAgentId;
+  if (!targetCartesiaId || !targetCartesiaId.startsWith("agent_") || targetCartesiaId === "agent_vDCfnuFdJokXJDVxgmHeZx" || targetCartesiaId === "agent_tEuFVc7x2cFNcSDSyAvRWm" || targetCartesiaId === "agent_WzcEn6kkRmPxAfBNHzvpa1") {
+    targetCartesiaId = "agent_64am1Eu4uBXX57WACaGrin";
+  }
+  const cartesiaWsUrl = `wss://api.cartesia.ai/agents/stream/${targetCartesiaId}?cartesia_version=2026-08-14&api_key=${encodeURIComponent(apiKey)}`;
   const cartesiaWs = new NodeWS(cartesiaWsUrl, {
     headers: {
       "Cartesia-Version": "2026-08-14",
@@ -1075,7 +1090,7 @@ async function handleCartesiaAgentStream(vobizWs, cartesiaAgentId, streamId, cal
 // Directly connects browser client to Cartesia Agent WebSocket in < 150ms.
 // Eliminates WebRTC signaling lag, LiveKit dependencies, and SpeechRecognition delays.
 // ──────────────────────────────────────────────────────────────────────────────
-async function handleBrowserCartesiaStream(clientWs, agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1") {
+async function handleBrowserCartesiaStream(clientWs, agentId = "agent_64am1Eu4uBXX57WACaGrin") {
   const apiKey = process.env.CARTESIA_API_KEY || "";
   if (!apiKey) {
     console.error("[BROWSER_CARTESIA] No CARTESIA_API_KEY found.");
@@ -1086,9 +1101,12 @@ async function handleBrowserCartesiaStream(clientWs, agentId = "agent_WzcEn6kkRm
     return;
   }
 
-  const targetAgentId = (agentId && typeof agentId === "string" && agentId.startsWith("agent_"))
+  let targetAgentId = (agentId && typeof agentId === "string" && agentId.startsWith("agent_"))
     ? agentId
-    : "agent_WzcEn6kkRmPxAfBNHzvpa1";
+    : "agent_64am1Eu4uBXX57WACaGrin";
+  if (targetAgentId === "agent_vDCfnuFdJokXJDVxgmHeZx" || targetAgentId === "agent_tEuFVc7x2cFNcSDSyAvRWm" || targetAgentId === "agent_WzcEn6kkRmPxAfBNHzvpa1") {
+    targetAgentId = "agent_64am1Eu4uBXX57WACaGrin";
+  }
 
   console.log(`[BROWSER_CARTESIA] Connecting browser directly to Cartesia Agent stream: ${targetAgentId}`);
 
@@ -1858,7 +1876,7 @@ server.on("upgrade", (req, socket, head) => {
       handleVobizStream(ws, agentId, callerNumber);
     });
   } else if (url === "/api/cartesia/stream" || url.startsWith("/api/cartesia/stream?") || url === "/api/cartesia/stream/") {
-    let agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1";
+    let agentId = "agent_64am1Eu4uBXX57WACaGrin";
     try {
       const parsedUrl = new URL(url, `http://localhost:${port}`);
       agentId = parsedUrl.searchParams.get("agentId") || agentId;
@@ -1888,7 +1906,7 @@ server.emit = function (event, ...args) {
     }
 
     if (url === "/api/cartesia/stream" || url.startsWith("/api/cartesia/stream?") || url === "/api/cartesia/stream/") {
-      let agentId = "agent_WzcEn6kkRmPxAfBNHzvpa1";
+      let agentId = "agent_64am1Eu4uBXX57WACaGrin";
       try {
         const parsedUrl = new URL(url, `http://localhost:${port}`);
         agentId = parsedUrl.searchParams.get("agentId") || agentId;
