@@ -153,6 +153,9 @@ export class CartesiaClient {
       }
     }
 
+    const latencyMs = Date.now() - t0;
+    const contentType = res.headers?.get("content-type") || "unknown";
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       console.error(`[CARTESIA_TTS_DIAGNOSTIC] FAILED HTTP ${res.status} | Content-Type: ${contentType} | Latency: ${latencyMs}ms | Voice: ${params.voiceId} | Error: ${errText}`);
