@@ -162,10 +162,7 @@ Visitor pricing అడిగితే:
     if (agent) {
       agent.cartesiaVoiceId = effectiveVoiceId;
       agent.cartesiaVoiceName = effectiveVoiceName;
-      if (currentKnown?.instructions) {
-        agent.systemPrompt = currentKnown.instructions;
-        agent.instructions = currentKnown.instructions;
-      }
+      // DB instructions are ground truth — never override with hardcoded KNOWN_AGENTS instructions
     } else if (cleanId && currentKnown) {
       agent = {
         id: cleanId,
